@@ -13,6 +13,11 @@ export interface Client {
   delayMs: number;
 }
 
+/** Filled in by `pages()` so callers can surface pagination loss in receipts. */
+export interface PageStats {
+  secondsSkipped: number;
+}
+
 const USER_AGENT = 'uranium-sentiment-pipeline (Cloudflare Workflow collector)';
 const MAX_ATTEMPTS = 5;
 const MAX_BACKOFF_MS = 60_000;
@@ -26,6 +31,7 @@ export async function* pages(
   kind: Kind,
   subreddit: string,
   window: Window,
+  stats: PageStats,
 ): AsyncGenerator<Row[]> {
   let cursor = window.after;
   let previousLast = -1;
@@ -41,8 +47,14 @@ export async function* pages(
     // second: a page that splits a same-second group cannot drop its tail.
     // The overlap costs duplicate rows, which Phase 2 dedups by id; a gap would
     // be permanent. When a page fails to advance the clock at all we are inside
-    // one oversized second and must step past it to make progress.
-    cursor = last === previousLast ? last : last - 1;
+    // one oversized second and must step past it to make progress — that skip
+    // can drop the second's tail, so it is counted for the receipt.
+    if (last === previousLast) {
+      stats.secondsSkipped++;
+      cursor = last;
+    } else {
+      cursor = last - 1;
+    }
     previousLast = last;
 
     await sleep(client.delayMs);

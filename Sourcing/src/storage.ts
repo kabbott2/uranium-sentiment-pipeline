@@ -5,6 +5,9 @@ export interface Receipt {
   keys_written: number;
   rows: number;
   last_created_utc: number;
+  /** Forced cursor advances past an oversized second; nonzero means the
+   *  partition may have lost that second's tail and needs manual review. */
+  seconds_skipped: number;
 }
 
 /** Backfill owns `{kind}-part-NNNN`; a rerun of a month replaces exactly this set. */

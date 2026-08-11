@@ -57,11 +57,12 @@ async function collectTail(
   stamp: string,
 ): Promise<Receipt> {
   const client = { base: env.ARCTIC_SHIFT_BASE, delayMs: env.REQUEST_DELAY_MS };
+  const stats = { secondsSkipped: 0 };
   const parts = new Map<string, number>();
   let rows = 0;
   let lastCreatedUtc = 0;
 
-  for await (const page of pages(client, kind, subreddit, window)) {
+  for await (const page of pages(client, kind, subreddit, window, stats)) {
     for (const [month, monthRows] of groupByMonth(page)) {
       const part = parts.get(month) ?? 0;
       parts.set(month, part + 1);
@@ -74,5 +75,10 @@ async function collectTail(
 
   const keysWritten = [...parts.values()].reduce((total, count) => total + count, 0);
 
-  return { keys_written: keysWritten, rows, last_created_utc: lastCreatedUtc };
+  return {
+    keys_written: keysWritten,
+    rows,
+    last_created_utc: lastCreatedUtc,
+    seconds_skipped: stats.secondsSkipped,
+  };
 }

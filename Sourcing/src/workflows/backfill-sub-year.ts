@@ -61,18 +61,24 @@ async function collectMonth(
   kind: Kind,
 ): Promise<Receipt> {
   const client = { base: env.ARCTIC_SHIFT_BASE, delayMs: env.REQUEST_DELAY_MS };
+  const stats = { secondsSkipped: 0 };
   let part = 0;
   let rows = 0;
   let lastCreatedUtc = 0;
 
-  for await (const page of pages(client, kind, subreddit, month)) {
+  for await (const page of pages(client, kind, subreddit, month, stats)) {
     await putRows(env.RAW, backfillKey(subreddit, month.label, kind, part), page);
     part++;
     rows += page.length;
     lastCreatedUtc = Math.max(lastCreatedUtc, page[page.length - 1]!.created_utc);
   }
 
-  const receipt: Receipt = { keys_written: part, rows, last_created_utc: lastCreatedUtc };
+  const receipt: Receipt = {
+    keys_written: part,
+    rows,
+    last_created_utc: lastCreatedUtc,
+    seconds_skipped: stats.secondsSkipped,
+  };
   await writeReceipt(env.RAW, subreddit, month.label, kind, receipt);
 
   // Part keys are deterministic, so a rerun overwrites in place; only now that

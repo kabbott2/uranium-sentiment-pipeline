@@ -70,8 +70,15 @@ async function fetchPage(
     const response = await fetch(url, { headers: { 'user-agent': USER_AGENT } });
 
     if (response.ok) {
-      const body = (await response.json()) as { data: Row[] | null };
-      return body.data ?? [];
+      const body = (await response.json()) as { data?: unknown };
+      // An empty page is the pagination loop's only termination condition, so
+      // a malformed 200 must throw rather than coerce to [] and end the window.
+      if (!Array.isArray(body.data)) {
+        throw new Error(
+          `Arctic Shift ${kind} search returned no data array for r/${subreddit}`,
+        );
+      }
+      return body.data as Row[];
     }
 
     if (response.status === 429) {

@@ -15,11 +15,10 @@ export default {
     if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
     if (!authorized(request, env.TRIGGER_SECRET)) return json(401, { error: 'unauthorized' });
 
-    const body = await request.json().catch(() => null);
-    const request_ = parseBackfillRequest(body, env);
-    if ('error' in request_) return json(400, { error: request_.error });
+    const parsed = parseBackfillRequest(await request.json().catch(() => null), env);
+    if ('error' in parsed) return json(400, { error: parsed.error });
 
-    const { subreddit, year, rerun } = request_;
+    const { subreddit, year, rerun } = parsed;
     const baseId = `backfill-${subreddit.toLowerCase()}-${year}`;
     const id = rerun ? `${baseId}-${Math.floor(Date.now() / 1000)}` : baseId;
 

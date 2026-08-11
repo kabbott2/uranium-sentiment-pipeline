@@ -123,11 +123,14 @@ Requirements:
   out of respect for Arctic Shift's rate limits.
 - **Backfill cutoff**: `before = start_of_backfill − 48h`, so every backfilled
   row has settled engagement. The hourly collector owns the fresh tail.
-- **Idempotency**: re-running a (subreddit, month) must be safe. A rerun clears
-  the `{kind}-part-*` objects it owns in that partition before rewriting, so a
-  shorter rerun cannot leave stale parts behind. It deliberately leaves the
-  hourly collector's `{kind}-recent-*` objects alone: those cover the fresh tail
-  and a backfill rerun of the current month must not delete them.
+- **Idempotency**: re-running a (subreddit, month) must be safe. Part keys are
+  deterministic (`{kind}-part-NNNN`), so a rerun overwrites in place; only after
+  the month's parts and receipt are all written does it delete stale parts with
+  index >= the number just written, so a shorter rerun cannot leave a stale tail
+  behind. Nothing in the raw layer is deleted before its replacement exists. The
+  rerun deliberately leaves the hourly collector's `{kind}-recent-*` objects
+  alone: those cover the fresh tail and a backfill rerun of the current month
+  must not delete them.
 
 ## Storage contract (what this phase writes)
 

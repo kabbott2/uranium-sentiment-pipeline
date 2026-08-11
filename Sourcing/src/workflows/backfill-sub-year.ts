@@ -8,7 +8,7 @@ import { pages, type Kind } from '../arctic-shift';
 import type { BackfillParams, Env } from '../env';
 import {
   backfillKey,
-  clearBackfillParts,
+  deleteStaleBackfillParts,
   putRows,
   writeReceipt,
   type Receipt,
@@ -60,8 +60,6 @@ async function collectMonth(
   month: Month,
   kind: Kind,
 ): Promise<Receipt> {
-  await clearBackfillParts(env.RAW, subreddit, month.label, kind);
-
   const client = { base: env.ARCTIC_SHIFT_BASE, delayMs: env.REQUEST_DELAY_MS };
   let part = 0;
   let rows = 0;
@@ -76,6 +74,10 @@ async function collectMonth(
 
   const receipt: Receipt = { keys_written: part, rows, last_created_utc: lastCreatedUtc };
   await writeReceipt(env.RAW, subreddit, month.label, kind, receipt);
+
+  // Part keys are deterministic, so a rerun overwrites in place; only now that
+  // the month's parts and receipt exist is a shorter rerun's tail deleted.
+  await deleteStaleBackfillParts(env.RAW, subreddit, month.label, kind, part);
 
   return receipt;
 }

@@ -31,22 +31,28 @@ export async function putRows(bucket: R2Bucket, key: string, rows: Row[]): Promi
   });
 }
 
-/** Clears a month's backfill objects for one kind so a rerun cannot leave stale
- *  parts behind when the new run produces fewer of them. Hourly objects live
- *  under a different name and are deliberately untouched. */
-export async function clearBackfillParts(
+/** Deletes backfill parts a shorter rerun did not overwrite (index >=
+ *  partsWritten). Runs only after the rerun's parts and receipt are written:
+ *  the raw layer is irreplaceable, so nothing is deleted before its
+ *  replacement exists. Hourly `{kind}-recent-*` objects live under a
+ *  different name and are deliberately untouched. */
+export async function deleteStaleBackfillParts(
   bucket: R2Bucket,
   subreddit: string,
   month: string,
   kind: Kind,
+  partsWritten: number,
 ): Promise<void> {
   const prefix = `${partitionPrefix(subreddit, month)}${kind}-part-`;
   let cursor: string | undefined;
 
   do {
     const listed = await bucket.list({ prefix, cursor });
-    if (listed.objects.length > 0) {
-      await bucket.delete(listed.objects.map((object) => object.key));
+    const stale = listed.objects
+      .map((object) => object.key)
+      .filter((key) => Number.parseInt(key.slice(prefix.length), 10) >= partsWritten);
+    if (stale.length > 0) {
+      await bucket.delete(stale);
     }
     cursor = listed.truncated ? listed.cursor : undefined;
   } while (cursor);

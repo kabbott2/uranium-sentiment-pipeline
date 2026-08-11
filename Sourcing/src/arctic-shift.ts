@@ -35,9 +35,21 @@ export async function* pages(
 ): AsyncGenerator<Row[]> {
   let cursor = window.after;
   let previousLast = -1;
+  let forcedPastSecond = false;
 
   while (true) {
     const rows = await fetchPage(client, kind, subreddit, cursor, window.before);
+
+    // A forced advance is only known to have dropped rows when the page after
+    // it comes back non-empty: the skipped second was cut short by the page
+    // limit while the window still had more to give. An empty page means the
+    // window ended in that second — how every ordinary run finishes, and why
+    // the skip cannot be counted where it happens. That case does hide a
+    // genuinely oversized final second, but the API gives no way to tell one
+    // from a second that simply fit.
+    if (forcedPastSecond && rows.length > 0) stats.secondsSkipped++;
+    forcedPastSecond = false;
+
     if (rows.length === 0) return;
 
     yield rows;
@@ -46,12 +58,11 @@ export async function* pages(
     // `after` is exclusive, so stepping one second back re-reads the boundary
     // second: a page that splits a same-second group cannot drop its tail.
     // The overlap costs duplicate rows, which Phase 2 dedups by id; a gap would
-    // be permanent. When a page fails to advance the clock at all we are inside
-    // one oversized second and must step past it to make progress — that skip
-    // can drop the second's tail, so it is counted for the receipt.
+    // be permanent. A page that fails to advance the clock lies entirely inside
+    // one second and has to step past it to make progress.
     if (last === previousLast) {
-      stats.secondsSkipped++;
       cursor = last;
+      forcedPastSecond = true;
     } else {
       cursor = last - 1;
     }

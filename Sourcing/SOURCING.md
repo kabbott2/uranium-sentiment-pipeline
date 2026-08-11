@@ -156,8 +156,12 @@ Requirements:
   `receipts/{subreddit}/{YYYY-MM}-{kind}.json` as well as returning it, so gaps
   are visible from R2 alone once instance history ages out.
 - Row counts carry a small deliberate overlap: pagination re-reads each page's
-  final second, so expect one duplicate row per page boundary
-  (`rows − unique_ids == parts − 1` per partition). Phase 2 dedups by id.
+  final second, so the duplicates at a boundary equal the row count of that
+  boundary second — at least one, often more. A forced advance past an
+  oversized second (receipt `seconds_skipped` > 0) produces zero duplicates at
+  its boundary, so `rows − unique_ids >= parts − 1` per partition holds only
+  when `seconds_skipped == 0`. The authoritative check is Phase 2's id-level
+  dedup.
 - Final check happens in Phase 2: posts-per-month by subreddit out of the
   derived Parquet — holes in that chart mean holes in the archive.
 

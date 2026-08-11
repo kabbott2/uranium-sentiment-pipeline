@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "uranium-sourcing",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "observability": {
+    "enabled": true
+  },
+  "r2_buckets": [
+    {
+      "binding": "RAW",
+      "bucket_name": "uranium-sentiment-raw"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "backfill-sub-year",
+      "binding": "BACKFILL",
+      "class_name": "BackfillSubYear"
+    },
+    {
+      "name": "collect-recent",
+      "binding": "COLLECT_RECENT",
+      "class_name": "CollectRecent",
+      "schedules": ["0 * * * *"]
+    }
+  ],
+  "vars": {
+    "ARCTIC_SHIFT_BASE": "https://arctic-shift.photon-reddit.com/api",
+    "WHOLE_SUB_SUBREDDITS": "UraniumSqueeze,nuclear,NuclearPower,NuclearEnergy",
+    "REQUEST_DELAY_MS": 350,
+    "RECENT_WINDOW_HOURS": 2,
+    "BACKFILL_CUTOFF_HOURS": 48,
+    "BACKFILL_MIN_YEAR": 2005
+  }
+}

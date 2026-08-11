@@ -1,0 +1,14 @@
+node_modules/
+.wrangler/
+dist/
+
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+*.pem
+
+# Academic references are third-party copyrighted PDFs; this repo is public.
+Sources/*.pdf
+
+.DS_Store

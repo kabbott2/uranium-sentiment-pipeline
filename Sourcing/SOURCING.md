@@ -1,0 +1,137 @@
+# SOURCING — Phase 1: Reddit collection, Arctic Shift → Cloudflare R2
+
+Working document. Defines the data collection method and the pipeline from the
+Arctic Shift API to storage on Cloudflare. The deliverable of this phase is a
+complete, continuously updated raw archive in R2. No cleaning, scoring, or
+analysis happens here — that starts in `../Data/`.
+
+## Pipeline at a glance
+
+```
+Arctic Shift API ──► Cloudflare Workflow (TypeScript, durable steps)
+                          │  gzipped NDJSON, one object per page batch
+                          ▼
+                     R2: raw/{subreddit}/{YYYY-MM}/part-NNNN.jsonl.gz
+                          │  (Phase 2 builds derived Parquet from this)
+                          ▼
+                     queried in place later by DuckDB — R2 is object
+                     storage, not a database server; DuckDB reads the
+                     files over the S3 protocol without downloading them
+```
+
+Two collection modes, one codebase:
+
+1. **Backfill** (historical, run once): one Workflow instance per
+   (subreddit, year); each step covers one month.
+2. **Ongoing** (hourly): a Cron Trigger Worker starts a small Workflow
+   instance that collects the trailing window for all target subreddits.
+
+## Source: Arctic Shift API
+
+- Base: `https://arctic-shift.photon-reddit.com/api` — free, no auth.
+- Coverage: Dec 2005 → current. No 1,000-item wall (this is why the official
+  Reddit API is not the source: it cannot enumerate history).
+- Workhorses: `/posts/search` and `/comments/search`. `limit=auto` returns
+  100–1000 rows per call.
+- Query params: `subreddit`, `after`, `before` (epoch or ISO 8601),
+  `sort=asc|desc`, `limit`, `fields=<csv>`.
+  - Do NOT use `fields` projection in this phase: raw means the full record.
+- Pagination (no cursor): request `sort=asc`, then advance `after` to the last
+  row's `created_utc` (+1 s if unchanged) until a page comes back empty.
+- Rate limits: informal, ~couple requests/sec sustained is safe. Read
+  `X-RateLimit-Remaining` / `X-RateLimit-Reset`; on 429, back off with
+  `step.sleep`. Be a good citizen — this is a free single-maintainer service.
+- Aggregate endpoints (`/search/aggregate`) currently 422 under load. Do not
+  depend on them.
+
+### Data-quality facts the collector must respect
+
+- **~36h engagement embargo**: rows younger than ~36h return
+  `score=1, num_comments=0, upvote_ratio=1` (placeholders). Text is real and
+  arrives at ~30 min latency; engagement settles later. Consequence: the
+  hourly collector fetches text fast, and a second pass re-fetches IDs after
+  ~48h to capture real scores (that refetch feeds Phase 2's score side table,
+  via `/posts/ids` and `/comments/ids` — 500 IDs per call).
+- Scores are single-snapshot, not a time series.
+- Deleted/removed content is retained with `removed_by_category` /
+  `removal_reason` populated — keep it; removal rates are themselves signal.
+- Schema drifts across years (old rows lack `upvote_ratio`, award fields).
+  Parsing must be lenient; store whatever comes back.
+
+## Targets
+
+The subreddit list lives in `../subreddits_to_scan.md`. Summary:
+
+- **Whole-sub capture** (every post + comment, no filter): r/UraniumSqueeze,
+  r/nuclear, r/NuclearPower, r/NuclearEnergy.
+- **Keyword-scoped capture**: the 17 large general venues (r/wallstreetbets,
+  r/stocks, …). Keyword list is OPEN — it will be derived empirically from
+  term frequency in the uranium-sub corpus once whole-sub capture lands.
+  Do not invent a keyword list; whole-sub capture is not blocked on it.
+- Blacklist r/uraniumglass by name before any keyword rule runs.
+
+Full-text search (`query`/`body` params) is one-subreddit-at-a-time and times
+out on very active subs. For r/wallstreetbets-scale keyword sweeps, the path
+is the Hugging Face Arctic Shift Parquet mirror queried from the Phase 2
+container, with the recent tail (mirror lags by weeks) topped up via this API.
+
+## Collector design (Cloudflare Workflows)
+
+Why Workflows and not a plain cron or GitHub Actions: durable execution.
+Each step's result is persisted; a failed step retries and the run resumes
+where it stopped instead of restarting. Missed runs are recoverable anyway
+(Arctic Shift is replayable), so the real enemy is silent failure, not
+downtime.
+
+Requirements:
+
+- **Backfill Workflow** `backfill-sub-year`, params `{subreddit, year}`.
+  One step per month. Each step paginates posts then comments for that
+  month window and writes to R2 as it goes.
+- **Steps return receipts, never data.** Step results cap at 1 MiB. A step
+  returns `{keys_written, rows, last_created_utc}` only.
+- **Stream, don't buffer.** Worker isolates have 128 MB memory; a busy month
+  cannot be held whole. Write one gzipped NDJSON object per page batch:
+  `raw/{subreddit}/{YYYY-MM}/part-NNNN.jsonl.gz` (posts and comments in
+  separate objects: `posts-part-NNNN` / `comments-part-NNNN`).
+- **R2 via native binding** (`env.RAW.put(...)`) — no S3 keys in code.
+- **Hourly Workflow** `collect-recent`: for each target subreddit, pull the
+  trailing ~2h window (overlap is fine, dedup happens in Phase 2 by id).
+  Triggered by a Cron Trigger (`0 * * * *`). Crons at >= 1h intervals get a
+  15-min CPU budget; more frequent ones get 30 s. Stay hourly.
+- **Manual trigger**: an HTTP endpoint on the Worker, guarded by a shared
+  secret, that spawns backfill instances for a given (subreddit, year).
+- **Concurrency throttle**: run only a handful of backfill instances at once,
+  out of respect for Arctic Shift's rate limits.
+- **Backfill cutoff**: `before = start_of_backfill − 48h`, so every backfilled
+  row has settled engagement. The hourly collector owns the fresh tail.
+- **Idempotency**: re-running a (subreddit, month) must be safe. Simplest
+  rule: a rerun overwrites that month's partition prefix entirely.
+
+## Storage contract (what this phase writes)
+
+- Bucket: private R2 on the Curzon Cloudflare account. Name/binding from
+  wrangler config, never hardcoded.
+- Layout: `raw/{subreddit}/{YYYY-MM}/{posts|comments}-part-NNNN.jsonl.gz`
+- Content: full Arctic Shift records, one JSON object per line, exactly as
+  returned. Append-only. Never edited, never projected, never "fixed".
+- This layer is the irreplaceable artifact: if Arctic Shift disappears
+  (Pushshift precedent, May 2023), this archive is the project.
+
+## Verification (definition of done for a backfill run)
+
+- Smoke test first: r/UraniumSqueeze, one recent year, one instance. Confirm
+  objects land in R2, gunzip cleanly, and row counts look sane before fanning
+  out to 21 subs × ~20 years.
+- Per-month receipt rows (from step results) logged somewhere queryable, so
+  gaps are visible.
+- Final check happens in Phase 2: posts-per-month by subreddit out of the
+  derived Parquet — holes in that chart mean holes in the archive.
+
+## Open items
+
+- [ ] Keyword list for the 17 general subs (derive from uranium-sub corpus).
+- [ ] Where receipts/run-logs live (R2 object? Workers Analytics Engine? KV?).
+- [ ] Score-refetch cadence for the side table (proposal: refetch IDs at
+      ~48h and ~7d, then freeze).
+- [ ] Hugging Face mirror sweep spec (belongs partly to Phase 2's container).

@@ -65,6 +65,10 @@ function parseBackfillRequest(body: unknown, env: Env): BackfillRequest {
 }
 
 function authorized(request: Request, secret: string): boolean {
+  // Without this, a missing secret and a missing Bearer token both encode to
+  // empty buffers and timingSafeEqual accepts every request.
+  if (!secret) return false;
+
   const header = request.headers.get('authorization') ?? '';
   const presented = new TextEncoder().encode(
     header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '',

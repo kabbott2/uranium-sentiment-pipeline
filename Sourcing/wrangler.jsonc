@@ -28,7 +28,7 @@
   "vars": {
     "ARCTIC_SHIFT_BASE": "https://arctic-shift.photon-reddit.com/api",
     "WHOLE_SUB_SUBREDDITS": "UraniumSqueeze,nuclear,NuclearPower,NuclearEnergy",
-    "REQUEST_DELAY_MS": 350,
+    "REQUEST_DELAY_MS": 1500,
     "RECENT_WINDOW_HOURS": 2,
     "BACKFILL_CUTOFF_HOURS": 48,
     "BACKFILL_MIN_YEAR": 2005

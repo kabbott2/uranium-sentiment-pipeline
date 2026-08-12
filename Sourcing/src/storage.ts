@@ -5,9 +5,15 @@ export interface Receipt {
   keys_written: number;
   rows: number;
   last_created_utc: number;
-  /** Forced cursor advances past an oversized second; nonzero means the
-   *  partition may have lost that second's tail and needs manual review. */
-  seconds_skipped: number;
+  /** Seconds the collector could not prove it read whole, equal to
+   *  `unproven_at.length`. Not measured loss — the archive exposes no reliable
+   *  per-second count — so treat it as a pointer to the recovery runbook in
+   *  SOURCING.md, with Phase 2's id-level dedup as the authority. */
+  seconds_unproven: number;
+  unproven_at: number[];
+  /** Seconds disproving the page-size floor the proof rests on. Always empty;
+   *  anything else invalidates every clean second in this partition. */
+  floor_violation_at: number[];
 }
 
 /** Backfill owns `{kind}-part-NNNN`; a rerun of a month replaces exactly this set. */

@@ -103,10 +103,13 @@ async function fetchPage(
   // Numeric limits cap at 100; `auto` is the only way to get large pages.
   url.searchParams.set('limit', 'auto');
 
+  // Called off the client it would receive `client` as its `this`, and the
+  // runtime's native fetch rejects any receiver that is not the global scope.
+  const { fetch: send } = client;
   let lastError = '';
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const response = await client.fetch(url, { headers: { 'user-agent': USER_AGENT } });
+    const response = await send(url, { headers: { 'user-agent': USER_AGENT } });
 
     if (response.ok) {
       const body = (await response.json()) as { data?: unknown };

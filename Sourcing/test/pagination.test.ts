@@ -8,6 +8,15 @@ const WINDOW = { after: 999, before: 2000 };
  *  that merely ran out of rows, which is the whole point of the floor. */
 const FLOOR = 100;
 
+test('the collector fetches without a receiver', async () => {
+  // The stub rejects a method call because the runtime's native fetch answers
+  // one with an `Illegal invocation` TypeError, which took the collector down
+  // for two hourly firings on 2026-08-12.
+  const result = await collectWindow({ rows: secondsEach(1000, 3), pageSize: FLOOR }, WINDOW);
+
+  assert.equal(result.unique, 3);
+});
+
 test('a window of single-row seconds is read whole and flags nothing', async () => {
   const result = await collectWindow({ rows: rowsAt([[1000, 1], [1001, 1], [1002, 1]]), pageSize: FLOOR }, WINDOW);
 

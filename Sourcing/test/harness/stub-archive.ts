@@ -38,7 +38,12 @@ function stubFetch(options: StubOptions, requests: URL[]): typeof fetch {
   );
   const scripted = [...(options.scripted ?? [])];
 
-  return async (input) => {
+  return async function (this: unknown, input) {
+    // Modules are strict, so a receiverless call leaves `this` undefined. Any
+    // other receiver means the collector called fetch as a method, which the
+    // runtime's native fetch rejects with an illegal-invocation TypeError.
+    if (this !== undefined) throw new Error('fetch must be called without a receiver');
+
     const url = new URL(String(input));
     requests.push(url);
 

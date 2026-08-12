@@ -224,12 +224,16 @@ Requirements:
 ## Recovering an unproven second (manual runbook)
 
 Not implemented in the collector, deliberately. A stall needs one subreddit to
-produce 100+ rows inside a single second; r/UraniumSqueeze runs ~760 comments a
-*month*, and the 17 general venues are collected from the Hugging Face mirror
-rather than this loop. Building recovery into the pagination path would be
-speculative machinery on the hot path for a case the targets cannot reach. The
-flag exists so that if it ever fires, it fires loudly and against a real case —
-and that is when this gets written as code.
+produce 100+ rows inside a single second, and no partition has yet managed it:
+the 2021–2026 backfill of r/UraniumSqueeze reports `seconds_unproven: 0`
+throughout. Size that risk against the archive's peak rather than the sub's
+current activity, because the two are two orders of magnitude apart — a busy
+month runs tens of thousands of comment rows (September 2021: 61,486 rows over
+307 parts) while 2026 runs a few hundred. The 17 general venues are collected
+from the Hugging Face mirror rather than this loop. Building recovery into the
+pagination path would be speculative machinery on the hot path for a case the
+targets have not reached. The flag exists so that if it ever fires, it fires
+loudly and against a real case — and that is when this gets written as code.
 
 Run this when a receipt shows `seconds_unproven > 0`. For each second `t` in
 `unproven_at`, with window `after = t − 1`, `before = t + 1`:
@@ -301,8 +305,11 @@ root, so the build must be configured with that as its root directory.
       `unproven_at` with its timestamp. Residual: a flagged second is not
       *repaired* — see the recovery runbook, which stays manual until a flag
       actually fires.
-- [ ] Watch `floor_violation_at` on the first fan-out. It should stay `[]`; if
-      it ever fills, the 100-row floor is wrong and the gate needs re-deriving.
+- [x] Watch `floor_violation_at` on the first fan-out. Held: the 2021–2025
+      backfill of r/UraniumSqueeze ran 120 steps over 4,123 pages and 795,432
+      rows with `floor_violation_at: []` and `seconds_unproven: 0` throughout.
+      Keep reading it on every new subreddit — the floor is a documented
+      promise, not a proven one.
 - [ ] Score-refetch cadence for the side table (proposal: refetch IDs at
       ~48h and ~7d, then freeze).
 - [ ] Hugging Face mirror sweep spec (belongs partly to Phase 2's container).

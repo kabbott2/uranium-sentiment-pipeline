@@ -4,7 +4,7 @@ import {
   type WorkflowStep,
   type WorkflowStepConfig,
 } from 'cloudflare:workers';
-import { pages, type Kind } from '../arctic-shift';
+import { pages, type Kind, type PageStats } from '../arctic-shift';
 import { targetSubreddits, type Env } from '../env';
 import { groupByMonth, putRows, recentKey, type Receipt } from '../storage';
 import { hourStamp, trailingWindow, type Window } from '../window';
@@ -56,8 +56,8 @@ async function collectTail(
   window: Window,
   stamp: string,
 ): Promise<Receipt> {
-  const client = { base: env.ARCTIC_SHIFT_BASE, delayMs: env.REQUEST_DELAY_MS };
-  const stats = { secondsSkipped: 0 };
+  const client = { base: env.ARCTIC_SHIFT_BASE, delayMs: env.REQUEST_DELAY_MS, fetch };
+  const stats: PageStats = { unprovenAt: [], floorViolationAt: [] };
   const parts = new Map<string, number>();
   let rows = 0;
   let lastCreatedUtc = 0;
@@ -79,6 +79,8 @@ async function collectTail(
     keys_written: keysWritten,
     rows,
     last_created_utc: lastCreatedUtc,
-    seconds_skipped: stats.secondsSkipped,
+    seconds_unproven: stats.unprovenAt.length,
+    unproven_at: stats.unprovenAt,
+    floor_violation_at: stats.floorViolationAt,
   };
 }

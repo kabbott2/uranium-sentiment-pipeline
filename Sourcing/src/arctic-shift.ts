@@ -11,16 +11,31 @@ export interface Row {
 export interface Client {
   base: string;
   delayMs: number;
+  /** Injected so the pagination tests can serve a stubbed archive. */
+  fetch: typeof fetch;
 }
 
-/** Filled in by `pages()` so callers can surface pagination loss in receipts. */
+/** Filled in by `pages()` so callers can surface pagination doubt in receipts. */
 export interface PageStats {
-  secondsSkipped: number;
+  /** Seconds whose stalled page reached the page-size floor, leaving the second
+   *  unprovable either way. */
+  unprovenAt: number[];
+  /** Seconds that disprove `MIN_AUTO_PAGE_ROWS`. Always empty in practice. */
+  floorViolationAt: number[];
 }
 
 const USER_AGENT = 'uranium-sentiment-pipeline (Cloudflare Workflow collector)';
 const MAX_ATTEMPTS = 5;
 const MAX_BACKOFF_MS = 60_000;
+
+/**
+ * `limit=auto` is documented to return between 100 and 1000 rows, so a shorter
+ * page cannot have been truncated and holds every row its query matched. That
+ * lower bound is the only completeness proof this API offers: there is no
+ * cursor, `sort=desc` returns the same head-of-second rows rather than the
+ * reverse, and the aggregate endpoint is unreliable at second granularity.
+ */
+const MIN_AUTO_PAGE_ROWS = 100;
 
 /**
  * Pages a search window oldest-first, yielding whole pages as they arrive so a
@@ -34,21 +49,18 @@ export async function* pages(
   stats: PageStats,
 ): AsyncGenerator<Row[]> {
   let cursor = window.after;
-  let previousLast = -1;
-  let forcedPastSecond = false;
+  let provenLast = -1;
 
   while (true) {
     const rows = await fetchPage(client, kind, subreddit, cursor, window.before);
 
-    // A forced advance is only known to have dropped rows when the page after
-    // it comes back non-empty: the skipped second was cut short by the page
-    // limit while the window still had more to give. An empty page means the
-    // window ended in that second — how every ordinary run finishes, and why
-    // the skip cannot be counted where it happens. That case does hide a
-    // genuinely oversized final second, but the API gives no way to tell one
-    // from a second that simply fit.
-    if (forcedPastSecond && rows.length > 0) stats.secondsSkipped++;
-    forcedPastSecond = false;
+    // A page under the floor holds everything its query matched, so nothing
+    // above its final second can still be in the window. A later row appearing
+    // anyway means `limit=auto` returned fewer than its documented minimum —
+    // and every clean second below is then a truncated page misread as whole.
+    if (provenLast >= 0 && rows.some((row) => row.created_utc > provenLast)) {
+      stats.floorViolationAt.push(provenLast);
+    }
 
     if (rows.length === 0) return;
 
@@ -58,15 +70,19 @@ export async function* pages(
     // `after` is exclusive, so stepping one second back re-reads the boundary
     // second: a page that splits a same-second group cannot drop its tail.
     // The overlap costs duplicate rows, which Phase 2 dedups by id; a gap would
-    // be permanent. A page that fails to advance the clock lies entirely inside
-    // one second and has to step past it to make progress.
-    if (last === previousLast) {
+    // be permanent. Re-reading with this `after` would repeat the page verbatim
+    // — ordering within a second is identical across identical requests — so
+    // the page ends inside `last` and the cursor can only advance by stepping
+    // over that second. Below the floor that is free: the page already holds
+    // the whole second. At or above it, the second's tail may be unread and
+    // there is no way to tell, so the second is recorded rather than repaired.
+    if (last - 1 === cursor) {
+      if (rows.length >= MIN_AUTO_PAGE_ROWS) stats.unprovenAt.push(last);
       cursor = last;
-      forcedPastSecond = true;
     } else {
       cursor = last - 1;
     }
-    previousLast = last;
+    provenLast = rows.length < MIN_AUTO_PAGE_ROWS ? last : -1;
 
     await sleep(client.delayMs);
   }
@@ -90,7 +106,7 @@ async function fetchPage(
   let lastError = '';
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const response = await fetch(url, { headers: { 'user-agent': USER_AGENT } });
+    const response = await client.fetch(url, { headers: { 'user-agent': USER_AGENT } });
 
     if (response.ok) {
       const body = (await response.json()) as { data?: unknown };

@@ -75,13 +75,21 @@ export async function putRows(bucket: R2Bucket, key: string, rows: Row[]): Promi
  *  partsWritten). Runs only after the rerun's parts and receipt are written:
  *  the raw layer is irreplaceable, so nothing is deleted before its
  *  replacement exists. Hourly `{kind}-recent-*` objects live under a
- *  different name and are deliberately untouched. */
+ *  different name and are deliberately untouched.
+ *
+ *  Only objects predating this run are eligible. A part index identifies a
+ *  position, not the run that wrote it, so two passes over one partition —
+ *  a manual rerun against the six-hourly sweep, or a firing that overran into
+ *  the next — would otherwise let whichever finished first delete the parts the
+ *  other had not reached yet, and `limit=auto` varies enough that they
+ *  legitimately disagree on the count. */
 export async function deleteStaleBackfillParts(
   bucket: R2Bucket,
   subreddit: string,
   month: string,
   kind: Kind,
   partsWritten: number,
+  writtenBefore: Date,
 ): Promise<void> {
   const prefix = `${partitionPrefix(subreddit, month)}${kind}-part-`;
   let cursor: string | undefined;
@@ -89,6 +97,7 @@ export async function deleteStaleBackfillParts(
   do {
     const listed = await bucket.list({ prefix, cursor });
     const stale = listed.objects
+      .filter((object) => object.uploaded < writtenBefore)
       .map((object) => object.key)
       .filter((key) => Number.parseInt(key.slice(prefix.length), 10) >= partsWritten);
     if (stale.length > 0) {

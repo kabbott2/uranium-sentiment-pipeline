@@ -265,6 +265,21 @@ Requirements:
   rerun deliberately leaves the hourly collector's `{kind}-recent-*` objects
   alone: those cover the fresh tail and a backfill rerun of the current month
   must not delete them.
+  Two guards keep that promise honest, because "index >= the number just
+  written" is a weaker claim than it reads as:
+  - **An empty response is a source failure, not an empty month.** The archive
+    only grows, so a month that has held rows cannot come back empty. Without a
+    check, one HTTP 200 carrying `{"data": []}` writes a zero receipt — which
+    reads as settled and closes the partition forever — and then deletes every
+    part from index 0 up. `collectMonth` reads the previous receipt before
+    writing a zero one and throws instead, so the step retries and then fails
+    loudly.
+  - **A part index is a position, not a run identity.** Only objects uploaded
+    before the current pass began are eligible for deletion. Otherwise two
+    passes over one partition — a manual rerun against the six-hourly sweep, or
+    a firing that overran into the next — let whichever finished first delete
+    the parts the other had not written yet, and `limit=auto` varies enough
+    (345–635 rows) that they legitimately disagree on the count.
 
 ## Storage contract (what this phase writes)
 

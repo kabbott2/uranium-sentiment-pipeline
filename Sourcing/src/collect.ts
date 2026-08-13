@@ -4,6 +4,7 @@ import {
   backfillKey,
   deleteStaleBackfillParts,
   putRows,
+  readReceipt,
   writeReceipt,
   type Receipt,
 } from './storage.ts';
@@ -53,6 +54,7 @@ export async function collectMonth(
   const client = { base: env.ARCTIC_SHIFT_BASE, delayMs: env.REQUEST_DELAY_MS, fetch };
   const stats: PageStats = { unprovenAt: [], floorViolationAt: [] };
   const settlement = newSettlement();
+  const startedAt = new Date();
   let part = 0;
   let rows = 0;
   let lastCreatedUtc = 0;
@@ -63,6 +65,20 @@ export async function collectMonth(
     rows += page.length;
     lastCreatedUtc = Math.max(lastCreatedUtc, page[page.length - 1]!.created_utc);
     tallySettlement(page, settlement, at, env);
+  }
+
+  // The archive only grows, so a month that has held rows cannot legitimately
+  // come back empty. Accepting one would write a zero receipt — which reads as
+  // settled and closes the partition — and then delete every part that receipt
+  // claims to replace. An empty 200 is a source failure, not a result.
+  if (part === 0) {
+    const previous = await readReceipt(env.RAW, subreddit, month.label, kind);
+    if (previous && (previous.keys_written ?? 0) > 0) {
+      throw new Error(
+        `Arctic Shift returned no ${kind} for r/${subreddit} ${month.label}, ` +
+          `which already holds ${previous.rows ?? 0} rows in ${previous.keys_written} objects`,
+      );
+    }
   }
 
   const receipt: Receipt = {
@@ -80,7 +96,7 @@ export async function collectMonth(
 
   // Part keys are deterministic, so a rerun overwrites in place; only now that
   // the month's parts and receipt exist is a shorter rerun's tail deleted.
-  await deleteStaleBackfillParts(env.RAW, subreddit, month.label, kind, part);
+  await deleteStaleBackfillParts(env.RAW, subreddit, month.label, kind, part, startedAt);
 
   return receipt;
 }

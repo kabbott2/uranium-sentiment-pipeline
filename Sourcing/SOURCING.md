@@ -289,6 +289,13 @@ Requirements:
   the backfill and the reconciler, which write the same deterministic keys, and
   `{posts|comments}-recent-{YYYYMMDDTHH}-part-NNNN.jsonl.gz` from the hourly
   collector.
+  - **Keys carry no collection-scope marker**, which is safe only while every
+    target is collected whole-sub. When the keyword path for subreddits 5–21
+    lands it must not write into this namespace: a keyword-scoped partition
+    would otherwise inherit a receipt claiming the month complete, and the
+    reconciler — which knows only whole-sub windows — would re-read it as
+    though it were. Give keyword collection its own prefix and its own
+    receipts, or the two scopes silently merge into a partition that is neither.
 - **`-part-` is authoritative, `-recent-` is provisional.** After a reconcile
   pass the same id exists in both: a placeholder copy the hourly collector wrote
   within 2h of creation, and a settled copy. Phase 2's dedup must therefore

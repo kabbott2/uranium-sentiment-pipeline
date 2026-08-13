@@ -19,12 +19,16 @@ Arctic Shift API ──► Cloudflare Workflow (TypeScript, durable steps)
                      files over the S3 protocol without downloading them
 ```
 
-Two collection modes, one codebase:
+Three collection modes, one codebase:
 
-1. **Backfill** (historical, run once): one Workflow instance per
-   (subreddit, year); each step covers one month.
-2. **Ongoing** (hourly): a Cron Trigger Worker starts a small Workflow
-   instance that collects the trailing window for all target subreddits.
+1. **Backfill** (`backfill-sub-year`, manual): seeds a year the archive has
+   never held. One Workflow instance per (subreddit, year), one step per month.
+2. **Ongoing** (`collect-recent`, hourly): collects the trailing window for all
+   target subreddits. Its output is provisional — the window is younger than the
+   archive's second retrieval, so the engagement in it is placeholder.
+3. **Reconcile** (`reconcile`, six-hourly): re-reads any partition that cannot be
+   shown final, and owns the moving boundary the other two leave between them.
+   This is what makes the archive converge rather than merely accumulate.
 
 ## Source: Arctic Shift API
 
@@ -44,6 +48,10 @@ Two collection modes, one codebase:
     recovery runbook below does use it, but only to *enumerate* ids, which are
     then hydrated back to full records via `/{kind}/ids` before anything is
     stored.
+  - `fields` has an undocumented whitelist narrower than the record: asking for
+    `upvote_ratio` returns `400 'upvote_ratio' is not a valid field`, and the
+    error names no valid set. Omitting `fields` returns everything and is the
+    safe path — worth knowing before anyone "optimises" the payload.
 - **`after` and `before` are both exclusive** (verified against the live API).
   A month window is therefore `after = monthStart − 1`, `before = nextMonthStart`,
   which tiles the calendar without gaps or double-counting.
@@ -96,24 +104,65 @@ Two collection modes, one codebase:
   It was tempting to use this endpoint as ground truth for "how many rows are
   really in this second". It cannot be. Completeness is decided by the page-size
   floor instead, and Phase 2's id-level dedup remains the authority.
-- `/{kind}/ids` takes a comma-separated `ids` list, **500 per call**. `t1_`/`t3_`
-  prefixes are accepted, unknown ids are silently omitted, and a **malformed id
-  fails the whole call with 400** — sanitise before batching. Results are not
-  documented as order-preserving; key by `id`.
+- `/{kind}/ids` takes a comma-separated `ids` list, **500 per call** — 501 is a
+  clean 400 and ~1000 exceeds the URL length with a 414. `t1_`/`t3_` prefixes
+  are accepted, unknown ids are silently omitted, duplicates are deduplicated,
+  and a **malformed id fails the whole call with 400** — sanitise before
+  batching. Results are not documented as order-preserving; key by `id`.
+  A 500-id call takes ~1.0s, so a repair pass is cheap: with the courtesy delay
+  that is ~200 ids/sec, and a month of all four whole-sub subreddits is seconds
+  of wall clock.
+- `/{kind}/ids` and `/{kind}/search` return identical engagement and identical
+  `_meta` presence for the same rows (0 disagreements over 247 records at ages
+  20h, 60h and 400h). The repair path and the collection path have the same
+  freshness, so there is no hidden difference to design around.
 
 ### Data-quality facts the collector must respect
 
-- **~36h engagement embargo**: rows younger than ~36h return
-  `score=1, num_comments=0, upvote_ratio=1` (placeholders). Text is real and
-  arrives at ~30 min latency; engagement settles later. Consequence: the
-  hourly collector fetches text fast, and a second pass re-fetches IDs after
-  ~48h to capture real scores (that refetch feeds Phase 2's score side table,
-  via `/posts/ids` and `/comments/ids` — 500 IDs per call).
-- Scores are single-snapshot, not a time series.
+Everything in this section was measured against the live API on 2026-08-13 over
+~8,000 rows and 1,372 stored records, not taken from documentation.
+
+- **Two retrievals, and only the second carries real engagement.** Arctic Shift
+  scrapes each record on ingest (~20s after creation, holding Reddit's
+  `score=1, num_comments=0, upvote_ratio=1` placeholders) and again at T+36h,
+  which writes the settled values. There is no third pass. Text is real from the
+  first retrieval; engagement is not.
+- **`_meta.retrieved_2nd_on` is present if and only if engagement is final.**
+  100% of rows past the second retrieval carry it, 0% before, across 6,369
+  records. This is the archive's own freshness flag, and it is what the
+  collector gates on — see `hasSettledEngagement` in `src/arctic-shift.ts`.
+- **Do not gate on elapsed time.** The 36h timer is exact to a 35-second band
+  (min 36.0008h, max 36.0097h), but it is a floor rather than a promise: the
+  re-scrape queue backlogs, and **74.4% of 2026-07 content was re-read late,
+  p50 115h, worst case 242h**. An age test would have recorded placeholders as
+  final for three quarters of that month.
+- **Do not gate on `score == 1` either.** About half of genuinely settled rows
+  (55.5% of posts, 45.5% of comments) legitimately score 1. `upvote_ratio == 1`
+  is likewise a false positive on 54.6% of settled posts.
+- **`retrieved_on` is not a freshness field.** It is ingest time, `created_utc`
+  + ~20s, and the second retrieval never updates it — a five-year-old settled
+  post still reports it. It is the field most likely to be mistaken for one.
+- **Engagement is frozen at T+36h and does not drift.** 521 records spanning
+  2021-09 to 2026-07 were refetched a day after collection: zero changed on
+  `score`, `num_comments` or `upvote_ratio`. A row read with the stamp is
+  therefore permanently correct — but what it holds is *engagement at 36h of
+  maturity*, not current Reddit engagement, and the index must be described that
+  way to Curzon. Every row being measured at identical maturity is arguably a
+  feature: the series never revises. Divergence from live Reddit is unmeasured,
+  because Reddit blocks unauthenticated reads.
+- Records from the Pushshift-era bulk import (roughly, before 2022) carry no
+  `_meta` at all and are as settled as they will ever be. `SETTLE_EXEMPT_BEFORE`
+  exempts them so they are not re-read forever.
+- Posts carry `hide_score`, a perfect inverse of the stamp (100% before the
+  second retrieval, 0% after) and a useful cross-check. Comments carry
+  `score_hidden`, which is *not* usable — Reddit does not populate it.
+- `upvote_ratio` is posts-only; no comment carries it.
 - Deleted/removed content is retained with `removed_by_category` /
   `removal_reason` populated — keep it; removal rates are themselves signal.
-- Schema drifts across years (old rows lack `upvote_ratio`, award fields).
-  Parsing must be lenient; store whatever comes back.
+- Schema drifts across years: old rows lack `upvote_ratio` and award fields,
+  pre-2022 rows use `retrieved_utc` where modern ones use `retrieved_on`, and
+  field counts grew (comments 50 → 80, posts 98 → 116). Parsing must be lenient;
+  store whatever comes back.
 
 ## Targets
 
@@ -159,12 +208,35 @@ Requirements:
   on the binding), not by a separate Cron Trigger Worker with a `scheduled()`
   handler — fewer moving parts, and on Workers Paid a scheduled instance may run
   up to an hour per firing without consuming a concurrency slot. Stay hourly.
+- **Reconcile Workflow** `reconcile`, on `"schedules": ["0 */6 * * *"]`. Each
+  firing re-reads the moving tail (`RECONCILE_MONTHS`, default the current month
+  and its predecessor) plus every already-collected partition whose receipt
+  cannot show `rows_unsettled: 0`, and writes the authoritative `{kind}-part-NNNN`
+  objects. A gap and a placeholder score are the same failure — R2 does not hold
+  what Arctic Shift has — and one re-pagination fixes both, so this owns the
+  boundary the 48h cutoff leaves behind *and* the settlement the hourly pass
+  cannot wait for.
+  - **The interval is a latency knob, not a correctness parameter.** A partition
+    that is still unsettled simply comes back next firing, so the schedule sets
+    how fast R2 converges and never whether it does. That matters because the
+    re-scrape backlog is unbounded: no fixed interval could guarantee freshness,
+    which is exactly why the flag is checked instead of a clock.
+  - Partitions that are settled and whose month has passed are dropped from the
+    survey permanently. Without that the sweep would re-read the whole archive
+    every six hours forever.
+  - It maintains; it does not seed. A configured subreddit with no receipts at
+    all is left alone, so bringing a new target online stays a deliberate
+    backfill call.
+  - Collection is filled forward from the newest receipt, capped at two years, so
+    an outage spanning months does not leave a hole no receipt points at.
 - **Manual trigger**: an HTTP endpoint on the Worker, guarded by a shared
   secret, that spawns backfill instances for a given (subreddit, year).
 - **Concurrency throttle**: run only a handful of backfill instances at once,
   out of respect for Arctic Shift's rate limits.
-- **Backfill cutoff**: `before = start_of_backfill − 48h`, so every backfilled
-  row has settled engagement. The hourly collector owns the fresh tail.
+- **Backfill cutoff**: `before = start_of_backfill − 48h`, so a backfilled row is
+  past the archive's second retrieval in the ordinary case. This is a
+  cost-saving heuristic and not the guarantee — the guarantee is `rows_unsettled`
+  on the receipt, and the reconciler acts on it when the backlog makes 48h wrong.
 - **Idempotency**: re-running a (subreddit, month) must be safe. Part keys are
   deterministic (`{kind}-part-NNNN`), so a rerun overwrites in place; only after
   the month's parts and receipt are all written does it delete stale parts with
@@ -179,8 +251,15 @@ Requirements:
 - Bucket: private R2 on the Curzon Cloudflare account. Name/binding from
   wrangler config, never hardcoded.
 - Layout: `raw/{subreddit}/{YYYY-MM}/{posts|comments}-part-NNNN.jsonl.gz` from
-  the backfill, and `{posts|comments}-recent-{YYYYMMDDTHH}-part-NNNN.jsonl.gz`
-  from the hourly collector. Subreddit is lowercased in the key so casing
+  the backfill and the reconciler, which write the same deterministic keys, and
+  `{posts|comments}-recent-{YYYYMMDDTHH}-part-NNNN.jsonl.gz` from the hourly
+  collector.
+- **`-part-` is authoritative, `-recent-` is provisional.** After a reconcile
+  pass the same id exists in both: a placeholder copy the hourly collector wrote
+  within 2h of creation, and a settled copy. Phase 2's dedup must therefore
+  **prefer the record carrying `_meta.retrieved_2nd_on`** rather than taking
+  whichever it meets first. Among stamped copies any will do — engagement does
+  not drift, so there is no tiebreak to get right. Subreddit is lowercased in the key so casing
   cannot split a partition. Receipts live outside the raw prefix, at
   `receipts/{subreddit}/{YYYY-MM}-{posts|comments}.json`.
 - Content: full Arctic Shift records, one JSON object per line, exactly as
@@ -218,6 +297,17 @@ Requirements:
   by rows past its final second proves that page was truncated after all. A
   non-empty value invalidates every clean second in that partition and means the
   gate must be re-derived before the archive can be trusted.
+- `rows_unsettled` counts rows whose engagement was still Arctic Shift's
+  placeholder when the partition was read, decided by `_meta.retrieved_2nd_on`
+  and never by elapsed time. Zero means the partition is final and the
+  reconciler closes it. Non-zero means it is reopened next firing, and
+  `oldest_unsettled_created_utc` says how far back the stall goes — compare it
+  against the re-scrape backlog before assuming something is wrong.
+  - A partition is expected to reach zero within a few days of its month ending.
+    One that does not is worth looking at directly: rows deleted before T+36h
+    may never receive a second retrieval at all, and such a partition would stay
+    open forever. The cost of that is bounded and visible rather than silent,
+    which is the point, but it is not nothing.
 - Final check happens in Phase 2: posts-per-month by subreddit out of the
   derived Parquet — holes in that chart mean holes in the archive.
 
@@ -226,7 +316,8 @@ Requirements:
 Not implemented in the collector, deliberately. A stall needs one subreddit to
 produce 100+ rows inside a single second, and no partition has yet managed it:
 the 2021–2026 backfill of r/UraniumSqueeze reports `seconds_unproven: 0`
-throughout. Size that risk against the archive's peak rather than the sub's
+throughout — 2021–2025 from the 2026-08-12 run, and 2026 from the 2026-08-13
+re-collection, the original 2026 run predating the counter entirely. Size that risk against the archive's peak rather than the sub's
 current activity, because the two are two orders of magnitude apart — a busy
 month runs tens of thousands of comment rows (September 2021: 61,486 rows over
 307 parts) while 2026 runs a few hundred. The 17 general venues are collected
@@ -282,6 +373,19 @@ curl -X POST "$WORKER_URL/backfill" \
 
 npx wrangler workflows instances describe backfill-sub-year <instance-id>
 npx wrangler workflows instances list collect-recent
+npx wrangler workflows instances list reconcile
+
+# the reconciler runs itself; trigger one out of band after a config change
+npx wrangler workflows trigger reconcile
+```
+
+`wrangler workflows trigger` starts an instance directly and needs no
+`TRIGGER_SECRET`, which is the easier route for a one-off backfill from a
+machine that already has wrangler authenticated:
+
+```sh
+npx wrangler workflows trigger backfill-sub-year \
+  '{"subreddit":"UraniumSqueeze","year":2026}' --id resettle-2026
 ```
 
 Reading objects back requires `--remote`; without it wrangler silently reads a
@@ -310,8 +414,19 @@ root, so the build must be configured with that as its root directory.
       rows with `floor_violation_at: []` and `seconds_unproven: 0` throughout.
       Keep reading it on every new subreddit — the floor is a documented
       promise, not a proven one.
-- [ ] Score-refetch cadence for the side table (proposal: refetch IDs at
-      ~48h and ~7d, then freeze).
+- [x] Score-refetch cadence. Superseded: the reconciler re-reads a partition
+      until its receipt shows `rows_unsettled: 0`, gating on
+      `_meta.retrieved_2nd_on` rather than on a refetch schedule, so no cadence
+      needs guessing. The `/{kind}/ids` side-table route is unnecessary for this
+      — a full re-pagination costs seconds at these volumes and yields the whole
+      record rather than a projection.
+- [ ] A handful of rows never receive a second retrieval at all: 9 of 6,105
+      across r/UraniumSqueeze's 2026, still bare four months on and not deleted.
+      `rows_abandoned` records them and `SETTLE_GIVE_UP_HOURS` stops the
+      reconciler retrying them forever, but Phase 2 must exclude them from any
+      engagement-weighted series rather than reading their `score=1` as a score.
+      Worth re-checking on a busier subreddit, where the absolute count will be
+      larger even if the rate holds near 0.15%.
 - [ ] Hugging Face mirror sweep spec (belongs partly to Phase 2's container).
 - [ ] Cross-instance concurrency cap for the fan-out. Per-request pacing is in
       place inside each instance; capping how many instances run at once needs a

@@ -20,6 +20,28 @@ Parquet/DuckDB tooling needs a real runtime.
    Rewritten wholesale on rescore/refetch; the text corpus is never touched.
 3. **Index Parquet** — the small joined table the dashboard reads.
 
+## Dedup: which copy of an id wins
+
+The hourly collector and the reconciler both write the same id, so dedup is
+required, not optional. SOURCING.md says prefer the copy carrying
+`_meta.retrieved_2nd_on`. **Implemented literally that rule loses 2022.**
+
+Bulk-imported rows carry no `_meta` at all and no stamped copy of them exists
+anywhere, so "keep only stamped rows" silently drops every row below the
+2023-07 import boundary — 594k of the 801k collected. The rule is a tiebreak
+between copies of the same id, never a filter on ids:
+
+1. Group by id.
+2. If any copy carries `_meta.retrieved_2nd_on`, take it (any one — engagement
+   does not drift once stamped).
+3. Otherwise take any copy. It is bulk-imported or unsettled, and which of those
+   is decided by the engagement itself, not by the presence of the stamp — see
+   `hasSettledEngagement` in `Sourcing/src/arctic-shift.ts`.
+
+Row counts in receipts are rows *written*, including the deliberate
+page-boundary overlap, so they exceed unique ids by design. Dedup is the
+authority; the receipt count is not a target to reconcile against.
+
 ## Query layer
 
 DuckDB reads the Parquet in place over the S3 protocol (`INSTALL httpfs`,

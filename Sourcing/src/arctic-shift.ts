@@ -35,7 +35,37 @@ export function hasSettledEngagement(row: Row, exemptBefore: number): boolean {
   if (row.created_utc < exemptBefore) return true;
 
   const meta = row._meta;
-  return typeof meta === 'object' && meta !== null && 'retrieved_2nd_on' in meta;
+  if (typeof meta === 'object' && meta !== null && 'retrieved_2nd_on' in meta) return true;
+
+  return carriesRealEngagement(row);
+}
+
+/**
+ * Engagement that cannot be the placeholder Reddit serves on ingest
+ * (`score=1, num_comments=0, upvote_ratio=1`), and is therefore final whether
+ * or not the archive stamped it.
+ *
+ * The stamp alone understates what is settled, because the bulk import
+ * backfilled whole months long after the exempt cutoff: r/UraniumSqueeze's
+ * 2024-03 posts are 99% unstamped yet carry 38 distinct scores up to 69, while
+ * its 2023-09 comments are unstamped and uniformly `score=1`. Both are bare;
+ * only one is a placeholder, and no date separates them.
+ *
+ * Only a value differing from the placeholder proves anything. A row matching
+ * it is left unproven rather than guessed either way, which is why this asks
+ * for evidence instead of testing `score === 1` — about half of settled rows
+ * legitimately score 1.
+ */
+function carriesRealEngagement(row: Row): boolean {
+  return (
+    isNumberOtherThan(row.score, 1) ||
+    isNumberOtherThan(row.num_comments, 0) ||
+    isNumberOtherThan(row.upvote_ratio, 1)
+  );
+}
+
+function isNumberOtherThan(value: unknown, placeholder: number): boolean {
+  return typeof value === 'number' && value !== placeholder;
 }
 
 /**

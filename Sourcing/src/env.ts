@@ -15,8 +15,12 @@ export interface Env {
   RECENT_WINDOW_HOURS: number;
   BACKFILL_CUTOFF_HOURS: number;
   BACKFILL_MIN_YEAR: number;
-  /** Records created before this carry no `_meta` and cannot be proven settled
-   *  by it; they came from the bulk import and are already final. */
+  /** 2023-07-01, the first month the archive's second retrieval covers both
+   *  kinds. Everything below it came from the bulk import, carries no `_meta`,
+   *  and is already final. Measured on r/UraniumSqueeze: posts are unstamped
+   *  through 2023-06 and comments through 2023-03, so the later of the two
+   *  bounds it. Bare rows above the cutoff are judged on their engagement
+   *  instead — see `hasSettledEngagement`. */
   SETTLE_EXEMPT_BEFORE: number;
   /** How long a row lacking the second-retrieval stamp stays worth re-reading.
    *  Bounds retrying only; it never decides whether a row is settled. */

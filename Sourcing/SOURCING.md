@@ -127,10 +127,11 @@ Everything in this section was measured against the live API on 2026-08-13 over
   `score=1, num_comments=0, upvote_ratio=1` placeholders) and again at T+36h,
   which writes the settled values. There is no third pass. Text is real from the
   first retrieval; engagement is not.
-- **`_meta.retrieved_2nd_on` is present if and only if engagement is final.**
-  100% of rows past the second retrieval carry it, 0% before, across 6,369
-  records. This is the archive's own freshness flag, and it is what the
-  collector gates on — see `hasSettledEngagement` in `src/arctic-shift.ts`.
+- **`_meta.retrieved_2nd_on` proves engagement is final, but its absence proves
+  nothing.** 100% of rows past the second retrieval carry it, 0% before, across
+  6,369 records — so the stamp is sufficient. It is not necessary: bulk-imported
+  rows are final without it (see below). The collector treats it as the first of
+  two settlement tests — see `hasSettledEngagement` in `src/arctic-shift.ts`.
 - **Do not gate on elapsed time.** The 36h timer is exact to a 35-second band
   (min 36.0008h, max 36.0097h), but it is a floor rather than a promise: the
   re-scrape queue backlogs, and **74.4% of 2026-07 content was re-read late,
@@ -150,12 +151,26 @@ Everything in this section was measured against the live API on 2026-08-13 over
   way to Curzon. Every row being measured at identical maturity is arguably a
   feature: the series never revises. Divergence from live Reddit is unmeasured,
   because Reddit blocks unauthenticated reads.
-- Records from the Pushshift-era bulk import (roughly, before 2022) carry no
-  `_meta` at all and are as settled as they will ever be. `SETTLE_EXEMPT_BEFORE`
-  exempts them so they are not re-read forever.
-- Posts carry `hide_score`, a perfect inverse of the stamp (100% before the
-  second retrieval, 0% after) and a useful cross-check. Comments carry
-  `score_hidden`, which is *not* usable — Reddit does not populate it.
+- **A bare row is not necessarily an unsettled one, and no date separates the
+  two.** Bulk-imported records carry no `_meta` at all and are as final as they
+  will ever be, but the import does not stop in one clean block. Measured on
+  r/UraniumSqueeze: posts are bare through 2023-06 and comments through 2023-03,
+  yet whole months above that boundary are bare too — 2024-03 posts are 99%
+  unstamped while carrying 38 distinct scores up to 69, which cannot be
+  placeholder data. Against that, 2023-08 through 2023-10 comments are bare and
+  uniformly `score=1`: those the archive genuinely never re-read.
+  So settlement takes two tests. `SETTLE_EXEMPT_BEFORE` (2023-07-01, the later
+  of the two per-kind boundaries) exempts the era below it wholesale; above it a
+  bare row is settled only if its engagement differs from the ingest placeholder
+  on at least one field. Across the sampled 2022–2024 partitions this moves
+  settlement from 45.7% to 96.7%, leaving exactly the three placeholder months
+  behind. Gating on the stamp alone abandoned 2022 and early 2023 entirely —
+  594k of the 801k rows collected.
+- Posts carry `hide_score` and comments `score_hidden`; **neither is a usable
+  settlement cross-check.** `score_hidden` is never populated by Reddit, and
+  `hide_score` does not track finality across the import boundary: 2024-03's
+  bare-but-final posts carry `true`, exactly as never-re-read rows do, while the
+  2022 bulk months carry `false`.
 - `upvote_ratio` is posts-only; no comment carries it.
 - Deleted/removed content is retained with `removed_by_category` /
   `removal_reason` populated — keep it; removal rates are themselves signal.

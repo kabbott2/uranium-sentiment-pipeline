@@ -4,8 +4,8 @@ import { engagementState, hasSettledEngagement, type Row } from '../src/arctic-s
 import { openPartitions } from '../src/partitions.ts';
 import { labelsOf, receipts, stubBucket, stubEnv, type BucketCalls } from './harness/stub-bucket.ts';
 
-/** 2022-01-01T00:00:00Z, matching `SETTLE_EXEMPT_BEFORE` in wrangler.jsonc. */
-const EXEMPT_BEFORE = 1640995200;
+/** 2023-07-01T00:00:00Z, matching `SETTLE_EXEMPT_BEFORE` in wrangler.jsonc. */
+const EXEMPT_BEFORE = 1688169600;
 
 const RECENT = 1786000000;
 
@@ -57,6 +57,29 @@ test('bulk-imported records predate _meta and count as settled', () => {
   const old = { created_utc: EXEMPT_BEFORE - 1, score: 42 } as Row;
 
   assert.equal(hasSettledEngagement(old, EXEMPT_BEFORE), true);
+});
+
+test('a bare row carrying real engagement is settled without a stamp', () => {
+  // The bulk import backfilled months above the cutoff too: 2024-03 posts are
+  // 99% unstamped yet score up to 69. Reading the stamp alone abandons them.
+  const bulk = row({ score: 69, num_comments: 12, upvote_ratio: 0.94 });
+
+  assert.equal(hasSettledEngagement(bulk, EXEMPT_BEFORE), true);
+});
+
+test('a bare row carrying placeholder engagement is not settled', () => {
+  // 2023-09 comments are bare and uniformly score 1 — the archive never
+  // re-read them, and no date distinguishes them from the bulk months.
+  const placeholder = row({ score: 1, num_comments: 0, upvote_ratio: 1 });
+
+  assert.equal(hasSettledEngagement(placeholder, EXEMPT_BEFORE), false);
+});
+
+test('one field differing from the placeholder is enough', () => {
+  // Comments carry neither num_comments nor upvote_ratio, so the score is the
+  // only evidence they can offer.
+  assert.equal(hasSettledEngagement(row({ score: 4 }), EXEMPT_BEFORE), true);
+  assert.equal(hasSettledEngagement(row({ score: 1, num_comments: 3 }), EXEMPT_BEFORE), true);
 });
 
 test('a bare row inside the horizon is still worth re-reading', () => {

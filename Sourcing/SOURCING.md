@@ -239,9 +239,14 @@ Requirements:
   - Partitions that are settled and whose month has passed are dropped from the
     survey permanently. Without that the sweep would re-read the whole archive
     every six hours forever.
-  - It maintains; it does not seed. A configured subreddit with no receipts at
-    all is left alone, so bringing a new target online stays a deliberate
-    backfill call.
+  - It seeds the tail but not the history. A configured subreddit with no
+    receipts still has its two-month tail reconciled, because the hourly
+    collector starts writing the moment a target enters the config and every row
+    it writes is placeholder. Gating the survey on receipts left r/nuclear,
+    r/NuclearPower and r/NuclearEnergy collecting hourly for two days with
+    nothing able to settle them — silently, since a sub with no receipts also
+    reports nothing. Backfilling a target's history remains a deliberate
+    `/backfill` call.
   - Collection is filled forward from the newest receipt, capped at two years, so
     an outage spanning months does not leave a hole no receipt points at.
 - **Manual trigger**: an HTTP endpoint on the Worker, guarded by a shared

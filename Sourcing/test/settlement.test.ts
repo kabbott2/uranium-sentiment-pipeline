@@ -177,10 +177,13 @@ test('a legacy receipt without a usable timestamp is reopened', async () => {
   assert.ok(labelsOf(open).includes('2026-02'), 'unprovable is treated as unsettled, never the reverse');
 });
 
-test('a subreddit the archive has never held is left alone', async () => {
+test('a target that was never backfilled still has its tail reconciled', async () => {
+  // r/nuclear collected hourly for two days with no receipt to its name: every
+  // row placeholder, and nothing reopening the month to settle them.
   const open = await openPartitions(stubEnv(stubBucket({}, calls())), 'nuclear', AT);
 
-  assert.deepEqual(open, [], 'seeding a new target stays a deliberate backfill call');
+  assert.deepEqual(labelsOf(open), ['2026-07', '2026-08'], 'the tail, and only the tail');
+  assert.equal(open.length, 4, 'both kinds of both months');
 });
 
 test('a gap in collection is filled forward past the configured tail', async () => {

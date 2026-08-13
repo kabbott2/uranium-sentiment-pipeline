@@ -34,14 +34,16 @@ export interface Partition {
  */
 export async function openPartitions(env: Env, subreddit: string, at: Date): Promise<Partition[]> {
   const known = await listCollectedPartitions(env.RAW, subreddit);
-
-  // A configured target the archive has never held is not this workflow's to
-  // start: seeding is a deliberate `/backfill` call. Once a year is seeded, its
-  // receipts bring the subreddit into scope here automatically.
-  if (known.length === 0) return [];
-
   const open: Partition[] = [];
   const queued = new Set<string>();
+
+  // The tail is reconciled whether or not the subreddit has ever been
+  // backfilled. The hourly collector starts writing the moment a target enters
+  // the config and every row it writes carries placeholder engagement; since
+  // receipts are the only index of what exists, gating this on them left an
+  // unseeded target's rows settling nowhere while they accumulated hourly.
+  // Seeding history is still a deliberate `/backfill` call — the tail reaches
+  // two months back, not five years.
 
   for (const label of tailLabels(env, known, at)) {
     for (const kind of KINDS) {

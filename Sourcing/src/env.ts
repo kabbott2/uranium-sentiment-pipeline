@@ -18,6 +18,9 @@ export interface Env {
   /** Records created before this carry no `_meta` and cannot be proven settled
    *  by it; they came from the bulk import and are already final. */
   SETTLE_EXEMPT_BEFORE: number;
+  /** How long a row lacking the second-retrieval stamp stays worth re-reading.
+   *  Bounds retrying only; it never decides whether a row is settled. */
+  SETTLE_GIVE_UP_HOURS: number;
   /** How many months back the reconciler re-reads unconditionally, to own the
    *  moving boundary the backfill's 48h cutoff leaves behind. */
   RECONCILE_MONTHS: number;

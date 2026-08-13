@@ -28,7 +28,8 @@ const STEP: WorkflowStepConfig = {
 export class BackfillSubYear extends WorkflowEntrypoint<Env, BackfillParams> {
   async run(event: WorkflowEvent<BackfillParams>, step: WorkflowStep) {
     const { subreddit, year } = event.payload;
-    const cutoff = secondsNow(event.timestamp) - this.env.BACKFILL_CUTOFF_HOURS * 3600;
+    const now = secondsNow(event.timestamp);
+    const cutoff = now - this.env.BACKFILL_CUTOFF_HOURS * 3600;
     const months = settledMonths(year, cutoff);
 
     const receipts: Array<Receipt & { month: string; kind: Kind }> = [];
@@ -36,7 +37,7 @@ export class BackfillSubYear extends WorkflowEntrypoint<Env, BackfillParams> {
     for (const month of months) {
       for (const kind of KINDS) {
         const receipt = await step.do(`${month.label} ${kind}`, STEP, () =>
-          collectMonth(this.env, subreddit, month, kind),
+          collectMonth(this.env, subreddit, month, kind, now),
         );
         receipts.push({ month: month.label, kind, ...receipt });
       }
@@ -48,6 +49,7 @@ export class BackfillSubYear extends WorkflowEntrypoint<Env, BackfillParams> {
       months_collected: months.length,
       rows: receipts.reduce((total, receipt) => total + receipt.rows, 0),
       rows_unsettled: receipts.reduce((total, receipt) => total + receipt.rows_unsettled, 0),
+      rows_abandoned: receipts.reduce((total, receipt) => total + receipt.rows_abandoned, 0),
       receipts,
     };
   }

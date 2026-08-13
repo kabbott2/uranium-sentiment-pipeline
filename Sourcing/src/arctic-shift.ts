@@ -38,6 +38,31 @@ export function hasSettledEngagement(row: Row, exemptBefore: number): boolean {
   return typeof meta === 'object' && meta !== null && 'retrieved_2nd_on' in meta;
 }
 
+/**
+ * `pending` rows are worth re-reading; `abandoned` ones are not. A few records
+ * never receive a second retrieval at all — measured at 9 of 6,105 rows over
+ * r/UraniumSqueeze's 2026, still bare four months on, live and undeleted — so
+ * without a horizon their partitions would reopen every firing forever and the
+ * archive would never converge.
+ *
+ * The horizon bounds retrying only. Whether a row is settled is still decided
+ * per row by the stamp and never by age, so abandoning one records that its
+ * engagement is permanently Arctic Shift's placeholder rather than pretending
+ * it is final.
+ */
+export type EngagementState = 'settled' | 'pending' | 'abandoned';
+
+export function engagementState(
+  row: Row,
+  at: number,
+  exemptBefore: number,
+  giveUpSeconds: number,
+): EngagementState {
+  if (hasSettledEngagement(row, exemptBefore)) return 'settled';
+
+  return at - row.created_utc > giveUpSeconds ? 'abandoned' : 'pending';
+}
+
 /** Filled in by `pages()` so callers can surface pagination doubt in receipts. */
 export interface PageStats {
   /** Seconds whose stalled page reached the page-size floor, leaving the second

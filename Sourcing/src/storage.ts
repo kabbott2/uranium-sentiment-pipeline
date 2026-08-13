@@ -14,13 +14,17 @@ export interface Receipt {
   /** Seconds disproving the page-size floor the proof rests on. Always empty;
    *  anything else invalidates every clean second in this partition. */
   floor_violation_at: number[];
-  /** Rows still carrying Arctic Shift's placeholder engagement, i.e. whose
-   *  second retrieval had not run when this partition was read. Non-zero means
-   *  the partition is not final and the reconciler will come back to it. */
+  /** Rows still awaiting the archive's second retrieval and young enough to
+   *  expect it. Non-zero means the partition is not final and the reconciler
+   *  will come back to it. */
   rows_unsettled: number;
   /** Earliest unsettled row, so a stuck partition can be diagnosed against the
    *  archive's re-scrape backlog. Zero when nothing is unsettled. */
   oldest_unsettled_created_utc: number;
+  /** Rows past the retry horizon that never received a second retrieval. Their
+   *  engagement is permanently placeholder — exclude them from any
+   *  engagement-weighted series rather than reading `score=1` as a score. */
+  rows_abandoned: number;
 }
 
 /** A receipt as it comes back out of R2. Every field is optional because objects

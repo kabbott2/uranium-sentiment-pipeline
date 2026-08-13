@@ -27,7 +27,8 @@ const STEP: WorkflowStepConfig = {
  */
 export class Reconcile extends WorkflowEntrypoint<Env, unknown> {
   async run(event: WorkflowEvent<unknown>, step: WorkflowStep) {
-    const cutoff = secondsNow(event.timestamp) - this.env.BACKFILL_CUTOFF_HOURS * 3600;
+    const now = secondsNow(event.timestamp);
+    const cutoff = now - this.env.BACKFILL_CUTOFF_HOURS * 3600;
     const collected: Array<Partition & { subreddit: string; rows_unsettled: number }> = [];
 
     for (const subreddit of targetSubreddits(this.env)) {
@@ -40,7 +41,7 @@ export class Reconcile extends WorkflowEntrypoint<Env, unknown> {
         if (!month) continue;
 
         const receipt = await step.do(`${subreddit} ${label} ${kind}`, STEP, () =>
-          collectMonth(this.env, subreddit, month, kind),
+          collectMonth(this.env, subreddit, month, kind, now),
         );
         collected.push({ subreddit, label, kind, rows_unsettled: receipt.rows_unsettled });
       }

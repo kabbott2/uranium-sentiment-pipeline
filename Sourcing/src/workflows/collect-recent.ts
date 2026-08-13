@@ -4,10 +4,11 @@ import {
   type WorkflowStep,
   type WorkflowStepConfig,
 } from 'cloudflare:workers';
-import { hasSettledEngagement, pages, type Kind, type PageStats } from '../arctic-shift.ts';
+import { pages, type Kind, type PageStats } from '../arctic-shift.ts';
+import { newSettlement, tallySettlement } from '../collect.ts';
 import { targetSubreddits, type Env } from '../env.ts';
 import { groupByMonth, putRows, recentKey, type Receipt } from '../storage.ts';
-import { hourStamp, trailingWindow, type Window } from '../window.ts';
+import { hourStamp, secondsNow, trailingWindow, type Window } from '../window.ts';
 
 const KINDS: Kind[] = ['posts', 'comments'];
 
@@ -29,6 +30,7 @@ const STEP: WorkflowStepConfig = {
  */
 export class CollectRecent extends WorkflowEntrypoint<Env, unknown> {
   async run(event: WorkflowEvent<unknown>, step: WorkflowStep) {
+    const now = secondsNow(event.timestamp);
     const window = trailingWindow(event.timestamp, this.env.RECENT_WINDOW_HOURS);
     const stamp = hourStamp(event.timestamp);
     const subreddits = targetSubreddits(this.env);
@@ -38,7 +40,7 @@ export class CollectRecent extends WorkflowEntrypoint<Env, unknown> {
     for (const subreddit of subreddits) {
       for (const kind of KINDS) {
         const receipt = await step.do(`${subreddit} ${kind}`, STEP, () =>
-          collectTail(this.env, subreddit, kind, window, stamp),
+          collectTail(this.env, subreddit, kind, window, stamp, now),
         );
         receipts.push({ subreddit, kind, ...receipt });
       }
@@ -58,14 +60,14 @@ async function collectTail(
   kind: Kind,
   window: Window,
   stamp: string,
+  at: number,
 ): Promise<Receipt> {
   const client = { base: env.ARCTIC_SHIFT_BASE, delayMs: env.REQUEST_DELAY_MS, fetch };
   const stats: PageStats = { unprovenAt: [], floorViolationAt: [] };
   const parts = new Map<string, number>();
+  const settlement = newSettlement();
   let rows = 0;
   let lastCreatedUtc = 0;
-  let rowsUnsettled = 0;
-  let oldestUnsettled = 0;
 
   for await (const page of pages(client, kind, subreddit, window, stats)) {
     for (const [month, monthRows] of groupByMonth(page)) {
@@ -76,12 +78,7 @@ async function collectTail(
 
     rows += page.length;
     lastCreatedUtc = Math.max(lastCreatedUtc, page[page.length - 1]!.created_utc);
-
-    for (const row of page) {
-      if (hasSettledEngagement(row, env.SETTLE_EXEMPT_BEFORE)) continue;
-      rowsUnsettled++;
-      oldestUnsettled = oldestUnsettled === 0 ? row.created_utc : Math.min(oldestUnsettled, row.created_utc);
-    }
+    tallySettlement(page, settlement, at, env);
   }
 
   const keysWritten = [...parts.values()].reduce((total, count) => total + count, 0);
@@ -93,7 +90,8 @@ async function collectTail(
     seconds_unproven: stats.unprovenAt.length,
     unproven_at: stats.unprovenAt,
     floor_violation_at: stats.floorViolationAt,
-    rows_unsettled: rowsUnsettled,
-    oldest_unsettled_created_utc: oldestUnsettled,
+    rows_unsettled: settlement.pending,
+    oldest_unsettled_created_utc: settlement.oldestPending,
+    rows_abandoned: settlement.abandoned,
   };
 }

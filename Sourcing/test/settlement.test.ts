@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hasSettledEngagement, type Row } from '../src/arctic-shift.ts';
+import { engagementState, hasSettledEngagement, type Row } from '../src/arctic-shift.ts';
 import { openPartitions } from '../src/partitions.ts';
 import { labelsOf, receipts, stubBucket, stubEnv, type BucketCalls } from './harness/stub-bucket.ts';
 
@@ -8,6 +8,9 @@ import { labelsOf, receipts, stubBucket, stubEnv, type BucketCalls } from './har
 const EXEMPT_BEFORE = 1640995200;
 
 const RECENT = 1786000000;
+
+/** 720h, matching `SETTLE_GIVE_UP_HOURS` in wrangler.jsonc. */
+const GIVE_UP = 720 * 3600;
 const AT = new Date('2026-08-13T14:00:00Z');
 const SUB = 'uraniumsqueeze';
 
@@ -54,6 +57,26 @@ test('bulk-imported records predate _meta and count as settled', () => {
   const old = { created_utc: EXEMPT_BEFORE - 1, score: 42 } as Row;
 
   assert.equal(hasSettledEngagement(old, EXEMPT_BEFORE), true);
+});
+
+test('a bare row inside the horizon is still worth re-reading', () => {
+  const state = engagementState(row({ score: 1 }), RECENT + GIVE_UP - 1, EXEMPT_BEFORE, GIVE_UP);
+
+  assert.equal(state, 'pending');
+});
+
+test('a bare row past the horizon is abandoned rather than retried forever', () => {
+  // Nine rows of r/UraniumSqueeze's 2026 were still bare four months on, live
+  // and undeleted. Without this their partitions never close.
+  const state = engagementState(row({ score: 1 }), RECENT + GIVE_UP + 1, EXEMPT_BEFORE, GIVE_UP);
+
+  assert.equal(state, 'abandoned');
+});
+
+test('the horizon bounds retrying, not settlement', () => {
+  const stamped = row({ _meta: { retrieved_2nd_on: RECENT + 129600 } });
+
+  assert.equal(engagementState(stamped, RECENT + GIVE_UP * 10, EXEMPT_BEFORE, GIVE_UP), 'settled');
 });
 
 test('a settled past month is not reopened', async () => {

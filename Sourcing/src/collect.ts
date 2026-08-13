@@ -1,4 +1,4 @@
-import { hasSettledEngagement, pages, type Kind, type PageStats } from './arctic-shift.ts';
+import { engagementState, pages, type Kind, type PageStats, type Row } from './arctic-shift.ts';
 import type { Env } from './env.ts';
 import {
   backfillKey,
@@ -8,6 +8,33 @@ import {
   type Receipt,
 } from './storage.ts';
 import type { Month } from './window.ts';
+
+export interface Settlement {
+  pending: number;
+  abandoned: number;
+  oldestPending: number;
+}
+
+export function newSettlement(): Settlement {
+  return { pending: 0, abandoned: 0, oldestPending: 0 };
+}
+
+/** Both collectors report settlement, so both count it the same way. */
+export function tallySettlement(rows: Row[], into: Settlement, at: number, env: Env): void {
+  for (const row of rows) {
+    const state = engagementState(row, at, env.SETTLE_EXEMPT_BEFORE, env.SETTLE_GIVE_UP_HOURS * 3600);
+    if (state === 'settled') continue;
+
+    if (state === 'abandoned') {
+      into.abandoned++;
+      continue;
+    }
+
+    into.pending++;
+    into.oldestPending =
+      into.oldestPending === 0 ? row.created_utc : Math.min(into.oldestPending, row.created_utc);
+  }
+}
 
 /**
  * Paginates one month of one kind into `{kind}-part-NNNN` objects and records
@@ -21,26 +48,21 @@ export async function collectMonth(
   subreddit: string,
   month: Month,
   kind: Kind,
+  at: number,
 ): Promise<Receipt> {
   const client = { base: env.ARCTIC_SHIFT_BASE, delayMs: env.REQUEST_DELAY_MS, fetch };
   const stats: PageStats = { unprovenAt: [], floorViolationAt: [] };
+  const settlement = newSettlement();
   let part = 0;
   let rows = 0;
   let lastCreatedUtc = 0;
-  let rowsUnsettled = 0;
-  let oldestUnsettled = 0;
 
   for await (const page of pages(client, kind, subreddit, month, stats)) {
     await putRows(env.RAW, backfillKey(subreddit, month.label, kind, part), page);
     part++;
     rows += page.length;
     lastCreatedUtc = Math.max(lastCreatedUtc, page[page.length - 1]!.created_utc);
-
-    for (const row of page) {
-      if (hasSettledEngagement(row, env.SETTLE_EXEMPT_BEFORE)) continue;
-      rowsUnsettled++;
-      oldestUnsettled = oldestUnsettled === 0 ? row.created_utc : Math.min(oldestUnsettled, row.created_utc);
-    }
+    tallySettlement(page, settlement, at, env);
   }
 
   const receipt: Receipt = {
@@ -50,8 +72,9 @@ export async function collectMonth(
     seconds_unproven: stats.unprovenAt.length,
     unproven_at: stats.unprovenAt,
     floor_violation_at: stats.floorViolationAt,
-    rows_unsettled: rowsUnsettled,
-    oldest_unsettled_created_utc: oldestUnsettled,
+    rows_unsettled: settlement.pending,
+    oldest_unsettled_created_utc: settlement.oldestPending,
+    rows_abandoned: settlement.abandoned,
   };
   await writeReceipt(env.RAW, subreddit, month.label, kind, receipt);
 

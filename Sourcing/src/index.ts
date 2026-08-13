@@ -1,11 +1,13 @@
-import { targetSubreddits, type Env } from './env';
+import { targetSubreddits, type Env } from './env.ts';
 
-export { BackfillSubYear } from './workflows/backfill-sub-year';
-export { CollectRecent } from './workflows/collect-recent';
+export { BackfillSubYear } from './workflows/backfill-sub-year.ts';
+export { CollectRecent } from './workflows/collect-recent.ts';
+export { Reconcile } from './workflows/reconcile.ts';
 
 /**
- * The only HTTP surface is the manual backfill trigger. The hourly collector
- * needs no endpoint — it is started by the workflow's own cron schedule.
+ * The only HTTP surface is the manual backfill trigger, which seeds a year the
+ * archive has never held. The hourly collector and the reconciler need no
+ * endpoint — each is started by its own workflow cron schedule.
  */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

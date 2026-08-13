@@ -4,16 +4,11 @@ import {
   type WorkflowStep,
   type WorkflowStepConfig,
 } from 'cloudflare:workers';
-import { pages, type Kind, type PageStats } from '../arctic-shift';
-import type { BackfillParams, Env } from '../env';
-import {
-  backfillKey,
-  deleteStaleBackfillParts,
-  putRows,
-  writeReceipt,
-  type Receipt,
-} from '../storage';
-import { secondsNow, settledMonths, type Month } from '../window';
+import type { Kind } from '../arctic-shift.ts';
+import { collectMonth } from '../collect.ts';
+import type { BackfillParams, Env } from '../env.ts';
+import type { Receipt } from '../storage.ts';
+import { secondsNow, settledMonths } from '../window.ts';
 
 const KINDS: Kind[] = ['posts', 'comments'];
 
@@ -26,6 +21,9 @@ const STEP: WorkflowStepConfig = {
  * One instance per (subreddit, year); one step per (month, kind). Steps return
  * receipts only — the rows themselves go straight to R2, because a step result
  * caps at 1 MiB and a busy month does not fit in a 128 MB isolate.
+ *
+ * This seeds a year the archive has never held. Keeping it current afterwards
+ * is the reconciler's job.
  */
 export class BackfillSubYear extends WorkflowEntrypoint<Env, BackfillParams> {
   async run(event: WorkflowEvent<BackfillParams>, step: WorkflowStep) {
@@ -49,43 +47,8 @@ export class BackfillSubYear extends WorkflowEntrypoint<Env, BackfillParams> {
       year,
       months_collected: months.length,
       rows: receipts.reduce((total, receipt) => total + receipt.rows, 0),
+      rows_unsettled: receipts.reduce((total, receipt) => total + receipt.rows_unsettled, 0),
       receipts,
     };
   }
-}
-
-async function collectMonth(
-  env: Env,
-  subreddit: string,
-  month: Month,
-  kind: Kind,
-): Promise<Receipt> {
-  const client = { base: env.ARCTIC_SHIFT_BASE, delayMs: env.REQUEST_DELAY_MS, fetch };
-  const stats: PageStats = { unprovenAt: [], floorViolationAt: [] };
-  let part = 0;
-  let rows = 0;
-  let lastCreatedUtc = 0;
-
-  for await (const page of pages(client, kind, subreddit, month, stats)) {
-    await putRows(env.RAW, backfillKey(subreddit, month.label, kind, part), page);
-    part++;
-    rows += page.length;
-    lastCreatedUtc = Math.max(lastCreatedUtc, page[page.length - 1]!.created_utc);
-  }
-
-  const receipt: Receipt = {
-    keys_written: part,
-    rows,
-    last_created_utc: lastCreatedUtc,
-    seconds_unproven: stats.unprovenAt.length,
-    unproven_at: stats.unprovenAt,
-    floor_violation_at: stats.floorViolationAt,
-  };
-  await writeReceipt(env.RAW, subreddit, month.label, kind, receipt);
-
-  // Part keys are deterministic, so a rerun overwrites in place; only now that
-  // the month's parts and receipt exist is a shorter rerun's tail deleted.
-  await deleteStaleBackfillParts(env.RAW, subreddit, month.label, kind, part);
-
-  return receipt;
 }

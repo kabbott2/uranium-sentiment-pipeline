@@ -39,6 +39,45 @@ export function settledMonths(year: number, cutoff: number): Month[] {
   return months;
 }
 
+/** The settled slice of one labelled month, or null when the label is malformed
+ *  or the cutoff leaves nothing in it to collect yet. */
+export function settledMonth(label: string, cutoff: number): Month | null {
+  const parsed = parseMonthLabel(label);
+  if (!parsed) return null;
+
+  return settledMonths(parsed.year, cutoff).find((month) => month.label === label) ?? null;
+}
+
+export function parseMonthLabel(label: string): { year: number; index: number } | null {
+  const match = /^(\d{4})-(\d{2})$/.exec(label);
+  if (!match) return null;
+
+  const index = Number(match[2]) - 1;
+  return index >= 0 && index < 12 ? { year: Number(match[1]), index } : null;
+}
+
+/** First second after the month ends. */
+export function monthEnd(year: number, index: number): number {
+  return Date.UTC(year, index + 1, 1) / 1000;
+}
+
+/** A month as a single number, so two of them can be compared and subtracted. */
+export function absoluteMonth(year: number, index: number): number {
+  return year * 12 + index;
+}
+
+/** The month containing `at` and the `count - 1` before it, newest first. */
+export function recentMonthLabels(at: Date, count: number): string[] {
+  const labels: string[] = [];
+
+  for (let back = 0; back < count; back++) {
+    const month = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() - back, 1));
+    labels.push(monthLabel(month.getUTCFullYear(), month.getUTCMonth()));
+  }
+
+  return labels;
+}
+
 export function trailingWindow(at: Date, hours: number): Window {
   const now = secondsNow(at);
   return { after: now - hours * SECONDS_PER_HOUR - 1, before: now + 1 };

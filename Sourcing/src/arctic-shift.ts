@@ -1,4 +1,4 @@
-import type { Window } from './window';
+import type { Window } from './window.ts';
 
 export type Kind = 'posts' | 'comments';
 
@@ -13,6 +13,29 @@ export interface Client {
   delayMs: number;
   /** Injected so the pagination tests can serve a stubbed archive. */
   fetch: typeof fetch;
+}
+
+/**
+ * Engagement is final if and only if Arctic Shift's second retrieval has run.
+ * The archive scrapes each record twice: once on ingest (~20s after creation,
+ * carrying Reddit's `score=1` placeholder) and once at T+36h, which writes
+ * `_meta.retrieved_2nd_on` and the settled values. There is no third pass, and
+ * the values never change afterwards.
+ *
+ * The field is checked rather than the clock because the re-scrape queue
+ * backlogs: 74% of 2026-07 content was re-read late, the worst by ten days, so
+ * an age test would have written placeholders as final for most of that month.
+ * `score === 1` is no substitute either — about half of settled rows legitimately
+ * score 1 — and `retrieved_on` is ingest time that the re-scrape never updates.
+ *
+ * Records predating the Pushshift-era bulk import carry no `_meta` at all and
+ * are as settled as they will ever be, hence the cutoff.
+ */
+export function hasSettledEngagement(row: Row, exemptBefore: number): boolean {
+  if (row.created_utc < exemptBefore) return true;
+
+  const meta = row._meta;
+  return typeof meta === 'object' && meta !== null && 'retrieved_2nd_on' in meta;
 }
 
 /** Filled in by `pages()` so callers can surface pagination doubt in receipts. */

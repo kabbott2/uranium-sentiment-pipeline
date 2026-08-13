@@ -4,10 +4,10 @@ import {
   type WorkflowStep,
   type WorkflowStepConfig,
 } from 'cloudflare:workers';
-import { pages, type Kind, type PageStats } from '../arctic-shift';
-import { targetSubreddits, type Env } from '../env';
-import { groupByMonth, putRows, recentKey, type Receipt } from '../storage';
-import { hourStamp, trailingWindow, type Window } from '../window';
+import { hasSettledEngagement, pages, type Kind, type PageStats } from '../arctic-shift.ts';
+import { targetSubreddits, type Env } from '../env.ts';
+import { groupByMonth, putRows, recentKey, type Receipt } from '../storage.ts';
+import { hourStamp, trailingWindow, type Window } from '../window.ts';
 
 const KINDS: Kind[] = ['posts', 'comments'];
 
@@ -21,8 +21,11 @@ const STEP: WorkflowStepConfig = {
  * than the interval on purpose: overlapping the previous firing is cheap and
  * Phase 2 dedups by id, whereas a missed minute is a hole in the archive.
  *
- * Text arrives here within ~30 min, but engagement fields are placeholders for
- * ~36h — settled scores come from the Phase 2 refetch, not from this pass.
+ * This window is younger than Arctic Shift's second retrieval, so effectively
+ * everything it writes carries placeholder engagement and its `-recent-` objects
+ * are provisional: real text at ~30 min latency, engagement that is not yet
+ * true. The reconciler re-reads the same months once the archive settles them
+ * and writes the authoritative `-part-` objects.
  */
 export class CollectRecent extends WorkflowEntrypoint<Env, unknown> {
   async run(event: WorkflowEvent<unknown>, step: WorkflowStep) {
@@ -61,6 +64,8 @@ async function collectTail(
   const parts = new Map<string, number>();
   let rows = 0;
   let lastCreatedUtc = 0;
+  let rowsUnsettled = 0;
+  let oldestUnsettled = 0;
 
   for await (const page of pages(client, kind, subreddit, window, stats)) {
     for (const [month, monthRows] of groupByMonth(page)) {
@@ -71,6 +76,12 @@ async function collectTail(
 
     rows += page.length;
     lastCreatedUtc = Math.max(lastCreatedUtc, page[page.length - 1]!.created_utc);
+
+    for (const row of page) {
+      if (hasSettledEngagement(row, env.SETTLE_EXEMPT_BEFORE)) continue;
+      rowsUnsettled++;
+      oldestUnsettled = oldestUnsettled === 0 ? row.created_utc : Math.min(oldestUnsettled, row.created_utc);
+    }
   }
 
   const keysWritten = [...parts.values()].reduce((total, count) => total + count, 0);
@@ -82,5 +93,7 @@ async function collectTail(
     seconds_unproven: stats.unprovenAt.length,
     unproven_at: stats.unprovenAt,
     floor_violation_at: stats.floorViolationAt,
+    rows_unsettled: rowsUnsettled,
+    oldest_unsettled_created_utc: oldestUnsettled,
   };
 }

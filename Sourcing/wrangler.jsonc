@@ -23,6 +23,12 @@
       "binding": "COLLECT_RECENT",
       "class_name": "CollectRecent",
       "schedules": ["0 * * * *"]
+    },
+    {
+      "name": "reconcile",
+      "binding": "RECONCILE",
+      "class_name": "Reconcile",
+      "schedules": ["0 */6 * * *"]
     }
   ],
   "vars": {
@@ -31,6 +37,8 @@
     "REQUEST_DELAY_MS": 1500,
     "RECENT_WINDOW_HOURS": 2,
     "BACKFILL_CUTOFF_HOURS": 48,
-    "BACKFILL_MIN_YEAR": 2005
+    "BACKFILL_MIN_YEAR": 2005,
+    "SETTLE_EXEMPT_BEFORE": 1640995200,
+    "RECONCILE_MONTHS": 2
   }
 }

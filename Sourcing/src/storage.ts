@@ -1,5 +1,5 @@
-import type { Kind, Row } from './arctic-shift';
-import { monthOf } from './window';
+import type { Kind, Row } from './arctic-shift.ts';
+import { monthOf } from './window.ts';
 
 export interface Receipt {
   keys_written: number;
@@ -14,6 +14,33 @@ export interface Receipt {
   /** Seconds disproving the page-size floor the proof rests on. Always empty;
    *  anything else invalidates every clean second in this partition. */
   floor_violation_at: number[];
+  /** Rows still carrying Arctic Shift's placeholder engagement, i.e. whose
+   *  second retrieval had not run when this partition was read. Non-zero means
+   *  the partition is not final and the reconciler will come back to it. */
+  rows_unsettled: number;
+  /** Earliest unsettled row, so a stuck partition can be diagnosed against the
+   *  archive's re-scrape backlog. Zero when nothing is unsettled. */
+  oldest_unsettled_created_utc: number;
+}
+
+/** A receipt as it comes back out of R2. Every field is optional because objects
+ *  written by earlier versions of the collector predate them, and the reconciler
+ *  has to decide what to do about exactly those. */
+export type StoredReceipt = Partial<Receipt> & {
+  subreddit?: string;
+  month?: string;
+  kind?: Kind;
+  collected_at?: string;
+};
+
+export async function readReceipt(
+  bucket: R2Bucket,
+  subreddit: string,
+  month: string,
+  kind: Kind,
+): Promise<StoredReceipt | null> {
+  const object = await bucket.get(receiptKey(subreddit, month, kind));
+  return object ? ((await object.json()) as StoredReceipt) : null;
 }
 
 /** Backfill owns `{kind}-part-NNNN`; a rerun of a month replaces exactly this set. */
@@ -82,9 +109,17 @@ export async function writeReceipt(
     ...receipt,
   });
 
-  await bucket.put(`receipts/${subreddit.toLowerCase()}/${month}-${kind}.json`, body, {
+  await bucket.put(receiptKey(subreddit, month, kind), body, {
     httpMetadata: { contentType: 'application/json' },
   });
+}
+
+export function receiptKey(subreddit: string, month: string, kind: Kind): string {
+  return `receipts/${subreddit.toLowerCase()}/${month}-${kind}.json`;
+}
+
+export function receiptPrefix(subreddit: string): string {
+  return `receipts/${subreddit.toLowerCase()}/`;
 }
 
 /** A trailing window can straddle a month boundary, so rows are filed by their

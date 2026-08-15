@@ -57,6 +57,20 @@ DuckDB reads the Parquet in place over the S3 protocol (`INSTALL httpfs`,
 R2 API token as secret). No database server exists. SQL surface needed:
 SELECT / WHERE / GROUP BY / date_trunc / JOIN / window functions.
 
+Verified working recipe (same env vars as the build):
+
+```sql
+INSTALL httpfs; LOAD httpfs;
+CREATE SECRET r2 (TYPE s3, KEY_ID '<R2_ACCESS_KEY_ID>',
+  SECRET '<R2_SECRET_ACCESS_KEY>',
+  ENDPOINT '<account-id>.r2.cloudflarestorage.com', URL_STYLE 'path');
+
+SELECT month, count(*)
+FROM read_parquet('s3://<DERIVED_BUCKET>/derived/comments/*/*/*.parquet',
+                  hive_partitioning=1)
+WHERE subreddit = 'uraniumsqueeze' GROUP BY month ORDER BY month;
+```
+
 ## Derived projection (settled 2026-08-15)
 
 One schema shared by the posts and comments tables; fields belonging to the

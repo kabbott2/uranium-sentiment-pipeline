@@ -36,7 +36,7 @@
   },
   "vars": {
     "RAW_BUCKET": "uranium-sentiment-raw",
-    "DERIVED_BUCKET": "uranium-sentiment-derived"
+    "DERIVED_BUCKET": "uranium-derived-sentiment"
   }
   // Secrets (wrangler secret put): R2_ENDPOINT, R2_ACCESS_KEY_ID,
   // R2_SECRET_ACCESS_KEY — an R2 API token scoped to read raw, write derived.

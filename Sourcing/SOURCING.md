@@ -443,7 +443,6 @@ root, so the build must be configured with that as its root directory.
 
 ## Open items
 
-- [ ] Keyword list for the 17 general subs (derive from uranium-sub corpus).
 - [x] Where receipts/run-logs live — R2 objects under `receipts/`, written by
       the step that produced them. No extra infrastructure.
 - [x] Oversized-second loss is no longer silent. The page-size floor decides

@@ -61,6 +61,8 @@ Verified working recipe (same env vars as the build):
 
 ```sql
 INSTALL httpfs; LOAD httpfs;
+SET TimeZone='UTC';  -- else to_timestamp() buckets months in local time,
+                     -- silently shifting boundary rows into the wrong month
 CREATE SECRET r2 (TYPE s3, KEY_ID '<R2_ACCESS_KEY_ID>',
   SECRET '<R2_SECRET_ACCESS_KEY>',
   ENDPOINT '<account-id>.r2.cloudflarestorage.com', URL_STYLE 'path');
@@ -146,6 +148,10 @@ nothing landed is a no-op. On Cloudflare the same image runs as a Container
   spec-settling session; hourly incremental runs have kept the layer current
   since. A concurrent full build and cron firing cannot conflict — both
   write the same deterministic keys and reconverge via the manifest.
+- The deployed container runs the *incremental* build only, which touches a
+  few small current-month partitions per firing. Run `build --full` from a
+  real machine: the heaviest months (~61k rows) are sized for laptop memory,
+  not necessarily for the `basic` container instance.
 - Local `wrangler deploy` builds the container image and therefore needs
   Docker with the buildx plugin (`brew install docker-buildx`, then link it
   into `~/.docker/cli-plugins/`). Without buildx the image build fails with

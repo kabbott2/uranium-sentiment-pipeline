@@ -18,6 +18,7 @@ everything, which is the path to take whenever cleaning rules change.
 import hashlib
 import io
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import pyarrow as pa
@@ -102,14 +103,22 @@ def discover_partitions(s3, cfg: Config, only_subreddit: str | None = None) -> l
 
 def build_partition(s3, cfg: Config, partition: Partition) -> int:
     """Read, dedup, project, write. Returns the unique-id row count."""
-    def raw_rows():
-        for obj in sorted(partition.objects, key=lambda o: o["Key"]):
-            yield from r2.read_jsonl_gz(s3, cfg.raw_bucket, obj["Key"])
+    # A partition is hundreds of small objects and the fetch is latency-bound,
+    # so objects are read concurrently. map() preserves key order, keeping the
+    # "first copy seen" dedup tiebreak deterministic; boto3 clients are
+    # thread-safe.
+    keys = [o["Key"] for o in sorted(partition.objects, key=lambda o: o["Key"])]
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        def raw_rows():
+            for batch in pool.map(
+                lambda key: list(r2.read_jsonl_gz(s3, cfg.raw_bucket, key)), keys
+            ):
+                yield from batch
 
-    rows = [
-        project(row, partition.kind, cfg.settle_exempt_before)
-        for row in dedupe(raw_rows())
-    ]
+        rows = [
+            project(row, partition.kind, cfg.settle_exempt_before)
+            for row in dedupe(raw_rows())
+        ]
     rows.sort(key=lambda r: (r["created_utc"] or 0, r["id"]))
 
     table = pa.Table.from_pylist(rows, schema=SCHEMA)
@@ -143,3 +152,23 @@ def run_build(cfg: Config, full: bool, only_subreddit: str | None = None) -> Non
 
     if not stale:
         print("derived layer already current")
+
+
+def run_check(cfg: Config, only_subreddit: str | None = None) -> None:
+    """Freshness check: is the derived layer current with raw?
+
+    Compares every raw partition's fingerprint against the manifest. This is
+    the health test for the hourly converter — run shortly after :15 it must
+    report zero stale partitions; run between a collector write and the next
+    :15 it legitimately reports the fresh tail as stale. Exits non-zero when
+    anything is stale so it can gate automation.
+    """
+    s3 = r2.client(cfg)
+    partitions = discover_partitions(s3, cfg, only_subreddit)
+    manifest = r2.read_json(s3, cfg.derived_bucket, MANIFEST_KEY) or {}
+    stale = [p.label for p in partitions if manifest.get(p.label) != p.fingerprint()]
+    print(f"{len(partitions)} raw partitions, {len(stale)} stale")
+    for label in stale:
+        print(f"  stale: {label}")
+    if stale:
+        raise SystemExit(1)

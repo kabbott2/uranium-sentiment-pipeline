@@ -118,7 +118,12 @@ python -m pytest test/        # offline, no credentials needed
 python -m derive build        # incremental: only partitions whose raw changed
 python -m derive build --full # full rebuild — run whenever cleaning rules change
 python -m derive report       # posts/comments-per-month sanity table vs receipts
+python -m derive check        # exit non-zero if any raw partition is stale in derived
 ```
+
+`check` is the hourly converter's health test: run shortly after :15 it must
+report zero stale partitions; run between a collector write at :00 and the
+next :15 it legitimately reports the fresh tail as stale.
 
 Incremental mode fingerprints each partition's raw objects (key, etag, size)
 against `state/build-manifest.json` in the derived bucket, so a run where
@@ -148,6 +153,7 @@ nothing landed is a no-op. On Cloudflare the same image runs as a Container
 - Workers Builds: this project deploys from the repo with root directory
   `Data/` (Sourcing has its own build rooted at `Sourcing/`). Container
   images are built in the cloud on push, so CI needs no local Docker.
+  Configured in the dashboard 2026-08-15.
 
 ## Open items
 
@@ -155,4 +161,11 @@ nothing landed is a no-op. On Cloudflare the same image runs as a Container
       miners, ETFs), how thread context is given to the model, batch cost
       cap, and where the prompt/model version is recorded for reruns.
 - [ ] Hugging Face mirror keyword sweep for the big general subs lives here.
-- [ ] First sanity chart: posts per month per subreddit (gap detection).
+- [x] First sanity chart: posts per month per subreddit. Ran 2026-08-15 via
+      `derive report` after the full build: r/UraniumSqueeze is gap-free
+      2021-02 (sub creation) through 2026-08 — 14,918 posts and 782,623
+      comments after dedup, receipts overcounting every settled month by the
+      designed pagination overlap and undercounting only the current month
+      (hourly rows newer than the last reconcile receipt). The three nuclear
+      subs show only their two-month hourly tail — their history is not yet
+      backfilled, which is a Sourcing decision, not a gap.

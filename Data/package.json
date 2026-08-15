@@ -1,0 +1,16 @@
+{
+  "name": "uranium-data",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "wrangler": "^4.123.0",
+    "@cloudflare/workers-types": "^5.20260815.1"
+  }
+}

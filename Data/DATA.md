@@ -135,6 +135,16 @@ nothing landed is a no-op. On Cloudflare the same image runs as a Container
 
 ## Deployed state (as of 2026-08-15)
 
+- The hourly converter is verified end to end (2026-08-15): the 21:15:25Z
+  cron firing converted the three partitions the collector had staled at
+  ~21:03Z, rewrote only those Parquet objects (untouched partitions kept
+  their timestamps), and `derive check` reported 0 stale four minutes later.
+  Cron-fire to layer-current took ~10 seconds.
+- Two timing facts from that verification: a deploy boots the container once
+  immediately, so an extra incremental build runs on every rollout (harmless
+  — the manifest makes it a no-op); and the collector actually lands each
+  hour's raw at ~:02–:05, so the :15 cron's cushion is ~10 minutes.
+
 - Worker `uranium-data` is live with the `15 * * * *` cron and carries the
   three secrets `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
   (`wrangler secret put`, an R2 Account API token scoped Object Read & Write

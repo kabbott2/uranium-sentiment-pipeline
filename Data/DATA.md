@@ -125,7 +125,29 @@ against `state/build-manifest.json` in the derived bucket, so a run where
 nothing landed is a no-op. On Cloudflare the same image runs as a Container
 (`Dockerfile`) started by the cron Worker in `src/index.ts` at :15 hourly —
 15 minutes after the hourly collector — so new raw converts within the hour.
-Workers Builds needs this project rooted at `Data/`, separate from Sourcing's.
+
+## Deployed state (as of 2026-08-15)
+
+- Worker `uranium-data` is live with the `15 * * * *` cron and carries the
+  three secrets `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
+  (`wrangler secret put`, an R2 Account API token scoped Object Read & Write
+  to both buckets). Rotating credentials means rotating that token and
+  re-putting the secrets — no code change.
+- The derived bucket is named **`uranium-derived-sentiment`** (word order
+  differs from `uranium-sentiment-raw`; it is what the R2 token is scoped
+  to). The name lives only in `wrangler.jsonc` vars and the `DERIVED_BUCKET`
+  env var.
+- The full historical build (`build --full`) was run 2026-08-15 from the
+  spec-settling session; hourly incremental runs have kept the layer current
+  since. A concurrent full build and cron firing cannot conflict — both
+  write the same deterministic keys and reconverge via the manifest.
+- Local `wrangler deploy` builds the container image and therefore needs
+  Docker with the buildx plugin (`brew install docker-buildx`, then link it
+  into `~/.docker/cli-plugins/`). Without buildx the image build fails with
+  `unknown flag: --load`.
+- Workers Builds: this project deploys from the repo with root directory
+  `Data/` (Sourcing has its own build rooted at `Sourcing/`). Container
+  images are built in the cloud on push, so CI needs no local Docker.
 
 ## Open items
 

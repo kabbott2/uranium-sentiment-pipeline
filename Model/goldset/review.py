@@ -106,6 +106,9 @@ def _assign_splits(rows: list[dict]) -> None:
     ordered = sorted(groups, key=lambda g: len(groups[g]), reverse=True)
     for i, key in enumerate(ordered):
         want = quota + (1 if i < remainder else 0)
+        # A scarce class (e.g. six strong-bearish rows) must not be swallowed
+        # whole by the exemplar set — the holdout needs some of it to measure.
+        want = min(want, max(1, len(groups[key]) // 2))
         for row in groups[key][:want]:
             row["split"] = "exemplar"
 

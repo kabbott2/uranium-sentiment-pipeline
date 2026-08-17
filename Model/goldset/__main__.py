@@ -5,6 +5,7 @@ from .config import from_env
 from .label import run_label
 from .review import run_export, run_merge
 from .sample import run_sample
+from .score import run_score
 
 
 def main() -> None:
@@ -24,6 +25,10 @@ def main() -> None:
     merge = review_sub.add_parser("merge", help="apply an edited review CSV")
     merge.add_argument("--edited", required=True, help="path of the edited review CSV")
 
+    score = sub.add_parser("score", help="score the holdout with a Workers AI model")
+    score.add_argument("--model", required=True, help="model id, e.g. @cf/openai/gpt-oss-120b")
+    score.add_argument("--limit", type=int, help="score only the first N unscored items")
+
     bench = sub.add_parser("bench", help="score agreement against the gold holdout")
     group = bench.add_mutually_exclusive_group(required=True)
     group.add_argument("--scores", help="R2 key of a scorer's JSONL output")
@@ -40,6 +45,8 @@ def main() -> None:
         run_export(cfg, args.out)
     elif args.command == "review":
         run_merge(cfg, args.edited)
+    elif args.command == "score":
+        run_score(cfg, args.model, limit=args.limit)
     else:
         run_bench(cfg, args.scores, args.self_check)
 

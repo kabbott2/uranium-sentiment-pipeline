@@ -28,6 +28,7 @@ def main() -> None:
     score = sub.add_parser("score", help="score the holdout with a Workers AI model")
     score.add_argument("--model", required=True, help="model id, e.g. @cf/openai/gpt-oss-120b")
     score.add_argument("--limit", type=int, help="score only the first N unscored items")
+    score.add_argument("--batch", type=int, default=1, help="items per model call (amortizes the prompt)")
 
     bench = sub.add_parser("bench", help="score agreement against the gold holdout")
     group = bench.add_mutually_exclusive_group(required=True)
@@ -46,7 +47,7 @@ def main() -> None:
     elif args.command == "review":
         run_merge(cfg, args.edited)
     elif args.command == "score":
-        run_score(cfg, args.model, limit=args.limit)
+        run_score(cfg, args.model, limit=args.limit, batch=args.batch)
     else:
         run_bench(cfg, args.scores, args.self_check)
 

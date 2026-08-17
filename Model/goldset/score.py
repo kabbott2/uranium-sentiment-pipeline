@@ -23,12 +23,14 @@ from .tags import load_taxonomy
 
 BAKEOFF_PREFIX = "model/bakeoff"
 EXEMPLARS_PER_LEVEL = 4
-MAX_OUTPUT_TOKENS = 1400
-CONCURRENCY = 6
+# Reasoning models spend their budget thinking before the JSON; GLM-4.7-flash
+# was truncating mid-thought at 1400 and failing validation ~60% of the time.
+MAX_OUTPUT_TOKENS = 3000
+CONCURRENCY = 12
 FLUSH_EVERY = 25
 
 
-def run_score(cfg: Config, model: str, limit: int | None = None) -> None:
+def run_score(cfg: Config, model: str, limit: int | None = None, batch: int = 1) -> None:
     token = os.environ.get("WORKERS_AI_TOKEN")
     account_id = os.environ.get("R2_ACCOUNT_ID")
     if not token or not account_id:
@@ -40,7 +42,8 @@ def run_score(cfg: Config, model: str, limit: int | None = None) -> None:
     labels = r2.read_jsonl(s3, cfg.derived_bucket, f"{GOLD_PREFIX}/labels.jsonl")
     system_prompt = _system_prompt(taxonomy, [l for l in labels if l["split"] == "exemplar"])
 
-    out_key = f"{BAKEOFF_PREFIX}/{_slug(model)}.jsonl"
+    suffix = f"-batch{batch}" if batch > 1 else ""
+    out_key = f"{BAKEOFF_PREFIX}/{_slug(model)}{suffix}.jsonl"
     scores = (
         r2.read_jsonl(s3, cfg.derived_bucket, out_key)
         if r2.exists(s3, cfg.derived_bucket, out_key)
@@ -52,36 +55,43 @@ def run_score(cfg: Config, model: str, limit: int | None = None) -> None:
         todo = todo[:limit]
     print(f"{model}: scoring {len(todo)} holdout items ({len(done)} already done)")
 
-    api = _Api(account_id, token, model)
+    api = _Api(account_id, token, model, batch)
     failures = []
+    version = f"{model}{suffix}"
+    chunks = [todo[i : i + batch] for i in range(0, len(todo), batch)]
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
         results = pool.map(
-            lambda item: (item, _score_one(api, system_prompt, item, taxonomy_keys)), todo
+            lambda chunk: (chunk, _score_chunk(api, system_prompt, chunk, taxonomy_keys)), chunks
         )
-        for i, (item, label) in enumerate(results, 1):
-            if label is None:
-                failures.append(item["doc_id"])
-            else:
-                scores.append({"doc_id": item["doc_id"], **label, "model_version": model})
-            if i % FLUSH_EVERY == 0 or i == len(todo):
+        done_count = 0
+        for chunk, labels_by_id in results:
+            for item in chunk:
+                label = labels_by_id.get(item["doc_id"])
+                if label is None:
+                    failures.append(item["doc_id"])
+                else:
+                    scores.append({"doc_id": item["doc_id"], **label, "model_version": version})
+            done_count += len(chunk)
+            if done_count % FLUSH_EVERY < batch or done_count == len(todo):
                 r2.put_jsonl(s3, cfg.derived_bucket, out_key, scores)
-                print(f"  {i}/{len(todo)} ({len(failures)} failures)")
+                print(f"  {done_count}/{len(todo)} ({len(failures)} failures)")
     if failures:
         print(f"{model} failed items: {failures}")
     print(f"wrote {len(scores)} scores to {out_key}")
 
 
 class _Api:
-    def __init__(self, account_id: str, token: str, model: str):
+    def __init__(self, account_id: str, token: str, model: str, batch: int = 1):
         self.url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions"
         self.token = token
         self.model = model
+        self.max_tokens = max(MAX_OUTPUT_TOKENS, 400 * batch)
 
     def chat(self, system: str, user: str) -> str:
         body = json.dumps(
             {
                 "model": self.model,
-                "max_tokens": MAX_OUTPUT_TOKENS,
+                "max_tokens": self.max_tokens,
                 "temperature": 0,
                 "messages": [
                     {"role": "system", "content": system},
@@ -155,6 +165,51 @@ def _item_view(row: dict) -> dict:
     if len(text) > MAX_TEXT_CHARS:
         text = text[:MAX_TEXT_CHARS] + "\n[truncated]"
     return {"doc_type": row["doc_type"], "context": row.get("context_text"), "text": text}
+
+
+def _score_chunk(api: _Api, system_prompt: str, chunk: list[dict], taxonomy_keys: set[str]) -> dict:
+    """Score several items in one call; items the batch reply misses or
+    botches fall back to individual calls, so batching never loses rows."""
+    if len(chunk) == 1:
+        label = _score_one(api, system_prompt, chunk[0], taxonomy_keys)
+        return {chunk[0]["doc_id"]: label} if label else {}
+    items = [{"doc_id": c["doc_id"], **_item_view(c)} for c in chunk]
+    prompt = (
+        "Label each of these items. Reply with ONLY a JSON array, one label object "
+        "per item, each including its \"doc_id\".\nItems: "
+        + json.dumps(items, ensure_ascii=False)
+    )
+    labels_by_id: dict[str, dict] = {}
+    try:
+        content = api.chat(system_prompt, prompt)
+    except Exception as e:
+        print(f"  batch request failed — {str(e)[:80]}")
+        content = ""
+    for raw in extract_json_array(content) or []:
+        if not isinstance(raw, dict) or raw.get("doc_id") not in {c["doc_id"] for c in chunk}:
+            continue
+        label = {k: raw.get(k) for k in ("tags", "overall_sentiment", "no_sentiment",
+                                         "tag_sentiment", "confidence", "rationale")}
+        if label["tag_sentiment"] is None:
+            label["tag_sentiment"] = {}
+        if not validate_label(label, taxonomy_keys):
+            labels_by_id[raw["doc_id"]] = label
+    for item in chunk:
+        if item["doc_id"] not in labels_by_id:
+            label = _score_one(api, system_prompt, item, taxonomy_keys)
+            if label:
+                labels_by_id[item["doc_id"]] = label
+    return labels_by_id
+
+
+def extract_json_array(content: str) -> list | None:
+    match = re.search(r"\[.*\]", content, re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
 
 
 def extract_json(content: str) -> dict | None:

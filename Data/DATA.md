@@ -121,7 +121,15 @@ python -m derive build        # incremental: only partitions whose raw changed
 python -m derive build --full # full rebuild — run whenever cleaning rules change
 python -m derive report       # posts/comments-per-month sanity table vs receipts
 python -m derive check        # exit non-zero if any raw partition is stale in derived
+python -m derive series       # daily volume series → series/{sub}/daily-volume.parquet
 ```
+
+`series` writes the first side table: one row per calendar day (UTC, no
+gaps) with `date, num_posts, num_comments, num_unique_authors`, plus a
+`daily-volume-receipt.json` sidecar, under `series/{subreddit}/` in the
+derived bucket. Unique authors are distinct across posts and comments
+together; NULL (deleted/removed) authors are excluded. The trailing ~2 days
+are partial while the hourly collector is still filling them.
 
 `check` is the hourly converter's health test: run shortly after :15 it must
 report zero stale partitions; run between a collector write at :00 and the

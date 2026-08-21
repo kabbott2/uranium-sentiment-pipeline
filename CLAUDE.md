@@ -16,7 +16,7 @@ SentimentAnalysis/
 ├── Sourcing/            ← Phase 1: collection from Arctic Shift → R2 (SOURCING.md)
 ├── Data/                ← Phase 2: raw → Parquet, side tables, DuckDB (DATA.md)
 ├── Model/               ← Phase 3: sentiment scoring + benchmark (MODEL.md)
-└── Dashboard/           ← Phase 4: Pages + DuckDB-WASM front end (DASHBOARD.md)
+└── Dashboard/           ← Phase 4: Worker dashboard (DASHBOARD.md)
 ```
 
 Each phase folder holds its own spec (a working document, not final), its

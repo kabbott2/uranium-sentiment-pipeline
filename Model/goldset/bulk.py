@@ -15,7 +15,7 @@ import duckdb
 from . import r2
 from .config import TAGS_PATH, Config
 from .label import MAX_TEXT_CHARS
-from .score import CONCURRENCY, FLUSH_EVERY, _Api, _score_chunk, _system_prompt
+from .score import FLUSH_EVERY, _Api, _score_chunk, _system_prompt
 from .tags import load_taxonomy
 
 BULK_PREFIX = "model/bulk"
@@ -23,12 +23,18 @@ TEACHER_MODEL = "@cf/deepseek-ai/deepseek-v4-flash-0731"
 SUBREDDIT = "uraniumsqueeze"
 
 # The two spikiest windows (14d volume vs history) plus a year-stratified
-# random slice so the fit also sees quiet-period language.
+# random slice so the fit also sees quiet-period language. Sizes are set by
+# scoring throughput (~60 items/min at batch 20): ~9k items ≈ 2.5h ≈ $4.
 SLICES = [
-    {"name": "squeeze-2021-09", "start": "2021-09-13", "end": "2021-09-27", "n": 8000},
-    {"name": "spike-2024-01", "start": "2024-01-15", "end": "2024-01-31", "n": 5000},
-    {"name": "random-by-year", "per_year": 1000},
+    {"name": "squeeze-2021-09", "start": "2021-09-13", "end": "2021-09-27", "n": 4000},
+    {"name": "spike-2024-01", "start": "2024-01-15", "end": "2024-01-31", "n": 2500},
+    {"name": "random-by-year", "per_year": 400},
 ]
+
+
+# The bake-off's concurrency 12 drowns in 429s on long runs (a failed batch
+# falls back to per-item calls, amplifying the burst); 4 stays under the limit.
+CONCURRENCY = 4
 
 
 def run_bulk_score(cfg: Config, model: str = TEACHER_MODEL, batch: int = 20,
@@ -106,7 +112,10 @@ def read_teacher_rows(cfg: Config) -> list[dict]:
     con = _connect(cfg)
     texts = {}
     for spec in SLICES:
-        for item in _slice_items(con, cfg, spec):
+        # No sampling cap here: any row ever scored in the slice's window
+        # stays usable for fitting even after a sample-size change.
+        widened = {**spec, ("per_year" if "per_year" in spec else "n"): 10 ** 9}
+        for item in _slice_items(con, cfg, widened):
             texts[item["doc_id"]] = item["text"]
     return [
         {**label, "text": texts[label["doc_id"]]}

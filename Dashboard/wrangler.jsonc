@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "uranium-dashboard",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "observability": {
+    "enabled": true
+  },
+  "r2_buckets": [
+    {
+      "binding": "DERIVED",
+      "bucket_name": "uranium-derived-sentiment"
+    }
+  ],
+  // 22:30 UTC weekdays — after both the NYSE Arca and TSX 16:00 ET closes,
+  // so the day's EOD rows exist. Each run refetches full history and
+  // overwrites, so a missed firing self-heals the next day.
+  "triggers": {
+    "crons": ["30 22 * * 1-5"]
+  },
+  "vars": {
+    "DASHBOARD_SUBREDDIT": "uraniumsqueeze"
+  }
+}

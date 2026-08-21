@@ -124,11 +124,10 @@ a{color:var(--gold)}
 details.quiet{margin-top:12px;color:var(--muted);font-size:12.5px}
 details.quiet .taggrid{margin-top:10px}
 
-footer{max-width:1160px;margin:0 auto;padding:0 20px 30px;color:var(--muted);font-size:11.5px;line-height:1.6}
 </style></head>
 <body>
 <div class="topbar"><div class="in">
-  <span class="brand">${title} <span class="accent">Exuberance Monitor</span><small>Reddit crowd nowcast</small></span>
+  <span class="brand">${title} <span class="accent">Exuberance Monitor</span><small>Reddit crowd monitor</small></span>
   <span class="right"><span class="dot" id="livedot">●</span><span id="freshness">loading…</span>
   <button id="themebtn" title="toggle light/dark">◐ theme</button></span>
 </div></div>
@@ -190,13 +189,6 @@ footer{max-width:1160px;margin:0 auto;padding:0 20px 30px;color:var(--muted);fon
     </div>
   </div>
 </div>
-
-<footer>
-  <b>Nowcast, not a leading indicator</b> — the barometer lags price (lead-lag pre-test, Model/FINDINGS.md).
-  Sentiment is domain-adapted VADER, a directional tone gauge; only daily aggregates are shown, never per-item scores.
-  Trailing ~2 days of Reddit data are partial while the collector fills them. Prices: Yahoo Finance EOD
-  (URNM · U-U.TO), refreshed 22:30 UTC weekdays. OFF_TOPIC has no keyword terms and is absent from the tag grid.
-</footer>
 
 <script>
 'use strict';

@@ -163,8 +163,9 @@ Sections, top to bottom:
    sentiment. **Clicking a tag card opens the tag detail** (inline expanding
    panel): a chart of that tag's daily volume bars + sentiment line (180d)
    with a toggle to full-history weekly, plus its summary stats.
-8. **Footer** — nowcast disclaimer, VADER accuracy numbers, sources,
-   OFF_TOPIC note.
+8. No footer. Per Kai (2026-08-21) the page carries no fine print and never
+   uses the word "nowcast" — accuracy numbers, source notes, and the
+   lag-vs-price finding live in this spec and `Model/FINDINGS.md` instead.
 
 **Measurement interaction (all charts, incl. tag details): press-and-hold
 drag** — hold and drag (either direction, mouse or touch) to pin a start

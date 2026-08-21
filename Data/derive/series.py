@@ -13,10 +13,9 @@ far, so those counts are still rising.
 import io
 import time
 
-import duckdb
 import pyarrow.parquet as pq
 
-from . import r2
+from . import duck, r2
 from .config import Config
 
 
@@ -74,20 +73,7 @@ def _daily_volume(cfg: Config, sub: str):
         LEFT JOIN daily ON daily.day = spine.day
         ORDER BY date
     """
-    return _connect(cfg).execute(sql, [sub]).fetch_arrow_table()
-
-
-def _connect(cfg: Config):
-    host = cfg.endpoint.removeprefix("https://")
-    con = duckdb.connect()
-    con.execute("INSTALL httpfs; LOAD httpfs;")
-    # Without this to_timestamp() buckets in local time and day boundaries drift.
-    con.execute("SET TimeZone='UTC'")
-    con.execute(
-        f"""CREATE SECRET r2 (TYPE s3, KEY_ID '{cfg.access_key_id}',
-            SECRET '{cfg.secret_access_key}', ENDPOINT '{host}', URL_STYLE 'path')"""
-    )
-    return con
+    return duck.connect(cfg).execute(sql, [sub]).fetch_arrow_table()
 
 
 def _receipt(sub: str, table) -> dict:

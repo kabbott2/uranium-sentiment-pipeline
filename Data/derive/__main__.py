@@ -2,6 +2,8 @@ import argparse
 
 from .build import run_build, run_check
 from .config import from_env
+from .dashboard import run_dashboard
+from .enrich import run_enrich
 from .report import run_report
 from .series import run_series
 
@@ -23,6 +25,15 @@ def main() -> None:
     series = sub.add_parser("series", help="build the daily volume series and store it in R2")
     series.add_argument("--subreddit", default="uraniumsqueeze", help="subreddit to aggregate")
 
+    enrich = sub.add_parser("enrich", help="tag + VADER-score derived partitions incrementally")
+    enrich.add_argument("--full", action="store_true", help="ignore the manifest and re-enrich everything")
+    enrich.add_argument("--subreddit", help="limit to one subreddit")
+
+    dashboard = sub.add_parser("dashboard", help="build the dashboard aggregates and JSON")
+    dashboard.add_argument("--subreddit", default="uraniumsqueeze", help="subreddit to aggregate")
+
+    sub.add_parser("cron", help="the hourly container run: build, enrich, dashboard")
+
     args = parser.parse_args()
     cfg = from_env()
     if args.command == "build":
@@ -31,6 +42,15 @@ def main() -> None:
         run_check(cfg, only_subreddit=args.subreddit)
     elif args.command == "series":
         run_series(cfg, args.subreddit)
+    elif args.command == "enrich":
+        run_enrich(cfg, full=args.full, only_subreddit=args.subreddit)
+    elif args.command == "dashboard":
+        run_dashboard(cfg, args.subreddit)
+    elif args.command == "cron":
+        run_build(cfg, full=False)
+        run_enrich(cfg)
+        for subreddit in cfg.dashboard_subreddits:
+            run_dashboard(cfg, subreddit)
     else:
         run_report(cfg, only_subreddit=args.subreddit)
 

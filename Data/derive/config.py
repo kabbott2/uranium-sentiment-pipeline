@@ -19,6 +19,11 @@ class Config:
     # created before it are settled without a stamp. Mirrors
     # SETTLE_EXEMPT_BEFORE in Sourcing/wrangler.jsonc.
     settle_exempt_before: int
+    # Versions of the Model-phase config artifacts the enrich pass applies;
+    # bumping either forces a full re-enrich via the manifest fingerprint.
+    enrich_lexicon: str
+    enrich_tags: str
+    dashboard_subreddits: tuple[str, ...]
 
 
 def _require(name: str) -> str:
@@ -42,4 +47,11 @@ def from_env() -> Config:
         raw_bucket=os.environ.get("RAW_BUCKET", "uranium-sentiment-raw"),
         derived_bucket=_require("DERIVED_BUCKET"),
         settle_exempt_before=int(os.environ.get("SETTLE_EXEMPT_BEFORE", "1688169600")),
+        enrich_lexicon=os.environ.get("ENRICH_LEXICON", "vader-v1d"),
+        enrich_tags=os.environ.get("ENRICH_TAGS", "tags-v1"),
+        dashboard_subreddits=tuple(
+            s.strip().lower()
+            for s in os.environ.get("DASHBOARD_SUBREDDITS", "uraniumsqueeze").split(",")
+            if s.strip()
+        ),
     )

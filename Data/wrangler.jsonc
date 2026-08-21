@@ -36,7 +36,12 @@
   },
   "vars": {
     "RAW_BUCKET": "uranium-sentiment-raw",
-    "DERIVED_BUCKET": "uranium-derived-sentiment"
+    "DERIVED_BUCKET": "uranium-derived-sentiment",
+    // Model-phase config artifact versions the enrich pass applies; bumping
+    // one forces a full re-enrich on the next run.
+    "ENRICH_LEXICON": "vader-v1d",
+    "ENRICH_TAGS": "tags-v1",
+    "DASHBOARD_SUBREDDITS": "uraniumsqueeze"
   }
   // Secrets (wrangler secret put): R2_ENDPOINT, R2_ACCESS_KEY_ID,
   // R2_SECRET_ACCESS_KEY — an R2 API token scoped to read raw, write derived.

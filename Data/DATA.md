@@ -21,13 +21,18 @@ consumer skipping this layer re-pays parsing and re-implements dedup.
    partitioned `subreddit/month`, rebuilt from raw whenever cleaning rules
    change. Dedup by id (hourly collector overlaps on purpose).
 2. **Side tables**, narrow, keyed on id:
-   - `id → sentiment, model_version` (written by Phase 3)
+   - **Enrich** (`enrich/{posts|comments}/subreddit=X/month=YYYY-MM/`):
+     `id → tags, vader_compound, vader_label, enrich_version` — keyword tags
+     plus adapted-VADER sentiment, built by `derive enrich` from the Model
+     phase's published configs (`model/config/`). Live since 2026-08-21.
+   - `id → sentiment, model_version` (LLM scores, written by Phase 3's
+     spike-window runs)
    - `id → score, fetched_at` (from the post-embargo score refetch)
-   - `id → tags` (written by the LLM tagging pass, which reads the derived
-     Parquet; spec still open, see below)
    Rewritten wholesale on rescore/refetch/retag; the text corpus is never
    touched.
-3. **Index Parquet** — the small joined table the dashboard reads.
+3. **Dashboard aggregates** — `series/{sub}/daily-sentiment.parquet` and
+   `daily-tags.parquet`, plus the compact `dashboard/{sub}/*.json` the
+   dashboard Worker serves (see `Dashboard/DASHBOARD.md`).
 
 ## Dedup: which copy of an id wins
 
@@ -122,14 +127,30 @@ python -m derive build --full # full rebuild — run whenever cleaning rules cha
 python -m derive report       # posts/comments-per-month sanity table vs receipts
 python -m derive check        # exit non-zero if any raw partition is stale in derived
 python -m derive series       # daily volume series → series/{sub}/daily-volume.parquet
+python -m derive enrich       # incremental: tag + VADER-score changed partitions
+python -m derive enrich --full # after an ENRICH_LEXICON / ENRICH_TAGS version bump
+python -m derive dashboard    # daily aggregates + dashboard JSON for one subreddit
+python -m derive cron         # what the container runs hourly: build → enrich → dashboard
 ```
 
-`series` writes the first side table: one row per calendar day (UTC, no
-gaps) with `date, num_posts, num_comments, num_unique_authors`, plus a
+`series` writes one row per calendar day (UTC, no gaps) with
+`date, num_posts, num_comments, num_unique_authors`, plus a
 `daily-volume-receipt.json` sidecar, under `series/{subreddit}/` in the
 derived bucket. Unique authors are distinct across posts and comments
 together; NULL (deleted/removed) authors are excluded. The trailing ~2 days
 are partial while the hourly collector is still filling them.
+`daily-sentiment.parquet` (from `derive dashboard`) is a superset of this
+series — same spine plus VADER stats — and is what the dashboard reads;
+`daily-volume` stays for standalone volume work.
+
+`enrich` mirrors the build's incremental pattern against
+`state/enrich-manifest.json`, fingerprinting each derived partition's ETag
+*plus* the config versions (`ENRICH_LEXICON`, default the current published
+lexicon; `ENRICH_TAGS`) — so a version bump re-enriches everything, and an
+unchanged hour is a no-op. Post text is `title + selftext` (title-only posts
+are first-class), comment text is `body`; NULL text keeps its row with NULL
+sentiment. The full first pass ran from a laptop (like `build --full`); the
+hourly container only touches changed partitions.
 
 `check` is the hourly converter's health test: run shortly after :15 it must
 report zero stale partitions; run between a collector write at :00 and the

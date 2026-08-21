@@ -67,7 +67,32 @@ spot-price spike window holds 9,663 scoreable items ≈ **$4.30** to score.
 Quiet periods stay unscored in v1; the versioned side table means widening
 coverage later is a rerun, not a redesign.
 
-## Operational notes
+## VADER domain adaptation (2026-08-21): ceiling confirmed at κ≈0.19
+
+For the exuberance dashboard's always-on sentiment series (DASHBOARD.md), a
+domain-adapted VADER was fitted: a checked-in lexicon overlay
+(`goldset/vader_lexicon.json` — uranium/WSB slang added, colliding stock
+entries like "trust"/"energy"/"share"/"enrich" neutralized), thresholds and a
+neutral-override rule tuned on the 42 exemplars only, then evaluated on the
+holdout via `bench --collapse3`. Four holdout evaluations were spent:
+
+| Version | Change | Exact | κ |
+|---|---|---|---|
+| vader-v0-stock | stock VADER (harness check) | 52.5% | 0.190 |
+| vader-v1 | lexicon + wide pos band (0.18) | 50.0% | 0.200 |
+| vader-v1b | + neutral override (neu ≥ 0.92) | 48.0% | 0.166 |
+| vader-v1c | lexicon only, canonical bands | 50.7% | 0.179 |
+| **vader-v1d** | domain slang + neutralizations only, no frequent ambiguous words | **51.7%** | **0.192** |
+
+Every variant lands within noise of stock (±2.5pt at n=408): exemplar-set
+gains (up to +12pt on the 42 rows) never transferred, and the bake-off's
+verdict stands — VADER cannot exceed κ≈0.19 on this corpus regardless of
+lexicon. **vader-v1d ships** (published to `model/config/vader-v1d/`): same
+measured accuracy as stock, but it removes systematic domain bias that would
+tilt the *aggregated* daily series (every "the trust" / "Boss Energy" /
+"share" mention nudging compounds positive), and it scores explicit finance
+slang correctly. The dashboard labels the series a directional tone gauge and
+cites these numbers; per-item scores are not truth and are never shown.
 
 - Scoring runs from a laptop via Cloudflare's OpenAI-compatible endpoint
   (`/ai/v1/chat/completions`); resumable — progress flushes to R2 every 25 items.

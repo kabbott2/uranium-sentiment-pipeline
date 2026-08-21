@@ -1,4 +1,4 @@
-from goldset.bench import quadratic_weighted_kappa
+from goldset.bench import COLLAPSED_LEVELS, collapse, quadratic_weighted_kappa
 
 
 def test_perfect_agreement_is_one():
@@ -19,3 +19,12 @@ def test_near_misses_beat_far_misses():
     near = quadratic_weighted_kappa([-2, 0, 2], [-1, 1, 2])
     far = quadratic_weighted_kappa([-2, 0, 2], [2, -2, -2])
     assert near > far
+
+
+def test_collapse_folds_five_levels_to_three():
+    assert [collapse(v) for v in (-2, -1, 0, 1, 2)] == [-1, -1, 0, 1, 1]
+
+
+def test_kappa_on_collapsed_levels_still_perfect_on_agreement():
+    values = [-1, 0, 1, 1, -1]
+    assert quadratic_weighted_kappa(values, values, COLLAPSED_LEVELS) == 1.0

@@ -12,9 +12,11 @@ from .config import GOLD_PREFIX, Config
 from .schema import SENTIMENT_LEVELS
 
 LEVELS = sorted(SENTIMENT_LEVELS)
+COLLAPSED_LEVELS = [-1, 0, 1]
 
 
-def run_bench(cfg: Config, scores_key: str | None, self_check: bool) -> None:
+def run_bench(cfg: Config, scores_key: str | None, self_check: bool,
+              collapse3: bool = False) -> None:
     s3 = r2.client(cfg)
     gold = [
         row
@@ -33,39 +35,51 @@ def run_bench(cfg: Config, scores_key: str | None, self_check: bool) -> None:
     if not paired:
         raise SystemExit("no overlap between scores and holdout")
 
-    _sentiment_report([g["overall_sentiment"] for g, _ in paired],
-                      [s["overall_sentiment"] for _, s in paired])
+    gold_vals = [g["overall_sentiment"] for g, _ in paired]
+    scored_vals = [s["overall_sentiment"] for _, s in paired]
+    levels = LEVELS
+    if collapse3:
+        gold_vals = [collapse(v) for v in gold_vals]
+        scored_vals = [collapse(v) for v in scored_vals]
+        levels = COLLAPSED_LEVELS
+        print("scale: collapsed to 3 classes (neg/neu/pos)")
+    _sentiment_report(gold_vals, scored_vals, levels)
     if all("tags" in s for _, s in paired):
         _tag_report(paired)
 
 
-def _sentiment_report(gold: list[int], scored: list[int]) -> None:
+def collapse(value: int) -> int:
+    return (value > 0) - (value < 0)
+
+
+def _sentiment_report(gold: list[int], scored: list[int], levels: list[int]) -> None:
     n = len(gold)
     exact = sum(g == s for g, s in zip(gold, scored)) / n
     off_by_one = sum(abs(g - s) <= 1 for g, s in zip(gold, scored)) / n
     print(f"\nsentiment  exact agreement: {exact:.1%}")
     print(f"sentiment  within one level: {off_by_one:.1%}")
-    print(f"sentiment  weighted kappa:   {quadratic_weighted_kappa(gold, scored):.3f}")
+    print(f"sentiment  weighted kappa:   {quadratic_weighted_kappa(gold, scored, levels):.3f}")
 
-    counts = {(g, s): 0 for g in LEVELS for s in LEVELS}
+    counts = {(g, s): 0 for g in levels for s in levels}
     for g, s in zip(gold, scored):
         counts[(g, s)] += 1
     print("\nconfusion (rows gold, cols scored):")
-    print("      " + "".join(f"{s:>6}" for s in LEVELS))
-    for g in LEVELS:
-        print(f"{g:>6}" + "".join(f"{counts[(g, s)]:>6}" for s in LEVELS))
+    print("      " + "".join(f"{s:>6}" for s in levels))
+    for g in levels:
+        print(f"{g:>6}" + "".join(f"{counts[(g, s)]:>6}" for s in levels))
 
 
-def quadratic_weighted_kappa(gold: list[int], scored: list[int]) -> float:
+def quadratic_weighted_kappa(gold: list[int], scored: list[int],
+                             levels: list[int] = LEVELS) -> float:
     n = len(gold)
-    span = (LEVELS[-1] - LEVELS[0]) ** 2
-    gold_totals = {v: gold.count(v) for v in LEVELS}
-    scored_totals = {v: scored.count(v) for v in LEVELS}
+    span = (levels[-1] - levels[0]) ** 2
+    gold_totals = {v: gold.count(v) for v in levels}
+    scored_totals = {v: scored.count(v) for v in levels}
     observed = sum((g - s) ** 2 / span for g, s in zip(gold, scored))
     expected = sum(
         gold_totals[g] * scored_totals[s] / n * (g - s) ** 2 / span
-        for g in LEVELS
-        for s in LEVELS
+        for g in levels
+        for s in levels
     )
     return 1.0 if expected == 0 else 1 - observed / expected
 

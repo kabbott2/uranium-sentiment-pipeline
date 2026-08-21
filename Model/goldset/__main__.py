@@ -1,6 +1,7 @@
 import argparse
 
 from .bench import run_bench
+from .bulk import run_bulk_score
 from .config import from_env
 from .label import run_label
 from .publish import run_publish_lexicon, run_publish_tags
@@ -52,6 +53,11 @@ def main() -> None:
     tags_sub = tags.add_subparsers(dest="tags_command", required=True)
     tags_sub.add_parser("publish", help="compile TAGS.md regexes to model/config/")
 
+    bulk = sub.add_parser("bulk", help="bulk teacher scoring over corpus slices")
+    bulk_sub = bulk.add_subparsers(dest="bulk_command", required=True)
+    bulk_score = bulk_sub.add_parser("score", help="DeepSeek pseudo-labels for the slices (resumable)")
+    bulk_score.add_argument("--limit", type=int, help="score only the first N unscored items per slice")
+
     args = parser.parse_args()
     cfg = from_env()
     if args.command == "sample":
@@ -72,6 +78,8 @@ def main() -> None:
         run_publish_lexicon(cfg)
     elif args.command == "tags":
         run_publish_tags(cfg)
+    elif args.command == "bulk":
+        run_bulk_score(cfg, limit=args.limit)
     else:
         run_bench(cfg, args.scores, args.self_check, collapse3=args.collapse3)
 

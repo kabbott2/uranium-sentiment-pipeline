@@ -27,6 +27,11 @@ TAG_BASELINE_DAYS = 90
 TAG_DAILY_TAIL_DAYS = 180
 # A z-score against fewer baseline points than this is noise, not a reading.
 MIN_BASELINE_POINTS = 60
+CHANGE_PERIODS = {"1W": 7, "1M": 30, "3M": 91, "1Y": 365}
+ANALOG_WINDOW = 30
+# The analog match must end this long before asof so "most similar period"
+# can never be the current period overlapping itself.
+ANALOG_GAP = 60
 
 
 def run_dashboard(cfg: Config, subreddit: str) -> None:
@@ -192,6 +197,70 @@ def _series_payload(sub: str, daily: list[dict], versions: dict,
             for row in daily
         ],
         "gauge": compute_gauge(daily),
+        "volume_changes": compute_volume_changes(daily),
+        "analog": compute_analog(daily),
+    }
+
+
+def compute_volume_changes(daily: list[dict]) -> dict:
+    """Mean daily items over each period (ending asof) vs the period before."""
+    asof_index = len(daily) - 1 - PARTIAL_DAYS
+    totals = [row["num_posts"] + row["num_comments"] for row in daily[: asof_index + 1]]
+    changes = {}
+    for name, days in CHANGE_PERIODS.items():
+        if len(totals) < 2 * days:
+            changes[name] = None
+            continue
+        current = sum(totals[-days:]) / days
+        previous = sum(totals[-2 * days: -days]) / days
+        changes[name] = {
+            "current": round(current, 1),
+            "previous": round(previous, 1),
+            "delta": round(current / previous - 1, 3) if previous else None,
+        }
+    return changes
+
+
+def compute_analog(daily: list[dict]) -> dict | None:
+    """The past ANALOG_WINDOW-day stretch most like the current one, compared
+    on the same footing the gauge uses: rolling volume and sentiment z-scores."""
+    asof_index = len(daily) - 1 - PARTIAL_DAYS
+    volumes = [math.log1p(row["num_posts"] + row["num_comments"]) for row in daily]
+    sentiments = [row["mean_compound"] for row in daily]
+    z_volume = [_trailing_zscore(volumes, i) for i in range(asof_index + 1)]
+    z_sentiment = [_trailing_zscore(sentiments, i) for i in range(asof_index + 1)]
+
+    def window(zs, end):
+        values = zs[end - ANALOG_WINDOW + 1: end + 1]
+        return None if any(v is None for v in values) else values
+
+    current_v = window(z_volume, asof_index)
+    current_s = window(z_sentiment, asof_index)
+    if current_v is None or current_s is None:
+        return None
+
+    best = None
+    for end in range(ANALOG_WINDOW - 1, asof_index - ANALOG_GAP + 1):
+        past_v, past_s = window(z_volume, end), window(z_sentiment, end)
+        if past_v is None or past_s is None:
+            continue
+        distance = math.sqrt(
+            sum((a - b) ** 2 for a, b in zip(current_v + current_s, past_v + past_s))
+            / (2 * ANALOG_WINDOW)
+        )
+        if best is None or distance < best[0]:
+            best = (distance, end)
+    if best is None:
+        return None
+
+    distance, end = best
+    value = max(-3.0, min(3.0, (z_volume[end] + z_sentiment[end]) / 2))
+    return {
+        "start": str(daily[end - ANALOG_WINDOW + 1]["date"]),
+        "end": str(daily[end]["date"]),
+        "band": band(value),
+        "similarity": round(1 / (1 + distance), 3),
+        "note": f"closest {ANALOG_WINDOW}d match in history",
     }
 
 

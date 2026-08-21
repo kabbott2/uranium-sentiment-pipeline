@@ -3,9 +3,12 @@ import random
 from datetime import date, timedelta
 
 from derive.dashboard import (
+    ANALOG_GAP,
     PARTIAL_DAYS,
     band,
+    compute_analog,
     compute_gauge,
+    compute_volume_changes,
     _tags_payload,
     _trailing_zscore,
     _window_mean,
@@ -100,6 +103,36 @@ def test_tags_payload_summarizes_and_bounds_the_daily_tail():
     assert tag["sent_7d"] == 0.2
     assert len(tag["daily"]) == 180
     assert len(tag["weekly"]) >= 56
+
+
+def test_volume_changes_compare_adjacent_periods():
+    volumes = [100] * 396 + [200] * 7 + [0] * PARTIAL_DAYS  # last full week doubled
+    changes = compute_volume_changes(make_daily(volumes))
+    assert changes["1W"] == {"current": 200.0, "previous": 100.0, "delta": 1.0}
+    assert changes["1M"]["delta"] > 0
+    assert changes["1Y"] is None  # needs 2 full years
+
+
+def test_analog_finds_the_matching_regime_and_respects_the_gap():
+    rng = random.Random(7)
+    volumes = [100 + rng.randint(0, 10) for _ in range(900)]
+    # One historical spike, then a current spike of the same shape.
+    for i in range(500, 530):
+        volumes[i] = 900 + rng.randint(0, 10)
+    for i in range(870, 900):
+        volumes[i] = 900 + rng.randint(0, 10)
+    daily = make_daily(volumes + [0] * PARTIAL_DAYS)
+    analog = compute_analog(daily)
+    assert analog is not None
+    start = date(2024, 1, 1)
+    matched_end = date.fromisoformat(analog["end"])
+    assert (matched_end - start).days <= 897 - ANALOG_GAP  # never the current window
+    assert 495 <= (date.fromisoformat(analog["start"]) - start).days <= 520
+    assert 0 < analog["similarity"] <= 1
+
+
+def test_analog_is_null_on_short_history():
+    assert compute_analog(make_daily([10] * 100)) is None
 
 
 def test_tags_payload_handles_no_tags():

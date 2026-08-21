@@ -17,8 +17,9 @@ test('root serves the page with the subreddit baked in', async () => {
   const response = await get(makeEnv({}), '/');
   assert.equal(response.headers.get('Content-Type'), 'text/html;charset=utf-8');
   const html = await response.text();
-  assert.match(html, /r\/URANIUMSQUEEZE/);
+  assert.match(html, /r\/Uraniumsqueeze/);
   assert.match(html, /\/api\/series/);
+  assert.match(html, /data-theme/); // light/dark support baked in
 });
 
 test('api routes proxy the published JSON with a short cache', async () => {

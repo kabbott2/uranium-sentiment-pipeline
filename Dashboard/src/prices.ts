@@ -63,7 +63,8 @@ export function validateSeries(next: PriceSeries, previous: PriceSeries | null):
 export async function refreshPrices(bucket: R2Bucket, now: number): Promise<string[]> {
   const report: string[] = [];
   for (const { yahoo, key } of SYMBOLS) {
-    const url = `${CHART_URL}${encodeURIComponent(yahoo)}?range=max&interval=1d`;
+    // Explicit period bounds: range=max silently truncates daily bars to ~1y.
+    const url = `${CHART_URL}${encodeURIComponent(yahoo)}?period1=0&period2=${now}&interval=1d`;
     const response = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
     if (!response.ok) {
       report.push(`${yahoo}: HTTP ${response.status}, kept previous`);

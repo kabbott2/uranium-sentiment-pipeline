@@ -225,6 +225,19 @@ red `#B23A2E`; dense monospace layout in the style of the SPUT dash):
   in front of the `uranium-dashboard.*.workers.dev` hostname — a dashboard-
   config change only, no code.
 
+## Deployed state (as of 2026-08-21)
+
+- Live at `https://uranium-dashboard.smithcloudflare.workers.dev` — first
+  deploy via `wrangler deploy`; full price history seeded the same day
+  (URNM 1,687 rows from 2019-12, U-U.TO 1,274 rows from 2021-07).
+- Yahoo note: `range=max` silently truncates daily bars to ~1y; the fetcher
+  uses explicit `period1=0&period2=now`.
+- Enrich backfill ran 2026-08-21 (2,028 days, 31 keyword-active tags);
+  the hourly container cron now runs build → enrich → dashboard.
+- Not yet done: connect Workers Builds for this worker (dashboard →
+  Workers & Pages → uranium-dashboard → Settings → Build → connect repo,
+  root directory `Dashboard/`), and the Access toggle below.
+
 ## Open items
 
 - [ ] Custom domain (only matters if circulated beyond Curzon).

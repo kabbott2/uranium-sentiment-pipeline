@@ -263,7 +263,9 @@ function buildCharts(){
     ]},
     options:{ responsive:true, maintainAspectRatio:false,
       interaction:{mode:'index', intersect:false},
-      scales:{ x:timeScale,
+      // offset:false — the bar default pads half a tick unit (half a YEAR at
+      // the ALL range) of dead space on each side of the axis.
+      scales:{ x:{...timeScale, offset:false},
         y:{ position:'left', title:{display:true,text:'ITEMS / DAY',color:NAVY},
             grid:{color:GRIDC}, border:{color:RULEC} },
         y2:{ position:'right', min:-1, max:1,
@@ -277,7 +279,10 @@ function buildCharts(){
 }
 
 function applyRange(range){
-  const min = rangeMin(range);
+  // One shared window for both panels so the linked crosshair lines up:
+  // never earlier than the Reddit series, never padded past the last day.
+  const min = rangeMin(range) || (DAILY.length ? DAILY[0].d : undefined);
+  const max = DAILY.length ? DAILY[DAILY.length-1].d : undefined;
   for(const [i,key] of [[0,'u-u-to'],[1,'urnm']]){
     const series = PRICES[key];
     priceChart.data.datasets[i].data = series ? indexed(series.rows, min) : [];
@@ -288,9 +293,12 @@ function applyRange(range){
   volChart.data.datasets[0].data = rows.map(r=>({x:r.d, y:r.p+r.c}));
   volChart.data.datasets[1].data = rows.map((r,i)=>({x:r.d, y:sm[offset+i]}));
   const unit = rows.length>500 ? 'year' : rows.length>120 ? 'month' : 'week';
-  priceChart.options.scales.x.time.unit = unit;
-  volChart.options.scales.x.time.unit = unit;
-  priceChart.update(); volChart.update();
+  for(const c of [priceChart, volChart]){
+    c.options.scales.x.time.unit = unit;
+    c.options.scales.x.min = min;
+    c.options.scales.x.max = max;
+    c.update();
+  }
 }
 
 function renderGauge(g){

@@ -99,7 +99,12 @@ def run_bulk_score(cfg: Config, model: str = TEACHER_MODEL, batch: int = 20,
 
 
 def read_teacher_rows(cfg: Config) -> list[dict]:
-    """All bulk pseudo-labels joined with their source texts, for fitting."""
+    """All bulk pseudo-labels joined with their source texts, for fitting.
+
+    Texts are pulled by doc_id semi-join in one pass — every row ever scored
+    stays usable regardless of later sample-size changes, and the corpus is
+    scanned once instead of once per slice.
+    """
     s3 = r2.client(cfg)
     labels = []
     for spec in SLICES:
@@ -110,13 +115,21 @@ def read_teacher_rows(cfg: Config) -> list[dict]:
         raise SystemExit("no bulk teacher scores in R2 — run `bulk score` first")
 
     con = _connect(cfg)
-    texts = {}
-    for spec in SLICES:
-        # No sampling cap here: any row ever scored in the slice's window
-        # stays usable for fitting even after a sample-size change.
-        widened = {**spec, ("per_year" if "per_year" in spec else "n"): 10 ** 9}
-        for item in _slice_items(con, cfg, widened):
-            texts[item["doc_id"]] = item["text"]
+    con.execute("CREATE TEMP TABLE teacher_ids (id VARCHAR)")
+    con.executemany("INSERT INTO teacher_ids VALUES (?)",
+                    [[label["doc_id"]] for label in labels])
+    sql = f"""
+        SELECT id, CASE WHEN selftext IS NOT NULL
+                        THEN title || chr(10) || chr(10) || selftext
+                        ELSE title END AS text
+        FROM read_parquet('{_glob(cfg, "posts")}', hive_partitioning=1)
+        WHERE subreddit = '{SUBREDDIT}' AND id IN (SELECT id FROM teacher_ids)
+        UNION ALL
+        SELECT id, body
+        FROM read_parquet('{_glob(cfg, "comments")}', hive_partitioning=1)
+        WHERE subreddit = '{SUBREDDIT}' AND id IN (SELECT id FROM teacher_ids)
+    """
+    texts = {id_: text for id_, text in con.execute(sql).fetchall() if text}
     return [
         {**label, "text": texts[label["doc_id"]]}
         for label in labels

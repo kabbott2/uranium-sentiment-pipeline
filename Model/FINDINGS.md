@@ -94,6 +94,36 @@ tilt the *aggregated* daily series (every "the trust" / "Boss Energy" /
 slang correctly. The dashboard labels the series a directional tone gauge and
 cites these numbers; per-item scores are not truth and are never shown.
 
+## VADER distillation (2026-08-22): vader-v2 ships, ceiling still κ≈0.19
+
+Per Kai's push for maximum VADER accuracy, ~9.6k items (the 2021-09 squeeze
+window, the 2024-01 spike window, and a year-stratified random slice) were
+pseudo-labeled with DeepSeek V4 Flash batch-20 (`model/bulk/*.jsonl`, ~$5,
+inside the pre-approved teacher budget; these double as the Phase-3 LLM side
+table for the spike windows). `goldset vader distill` fits token valences
+from shrunken label associations — taxonomy entity terms and VADER's own
+booster/negation machinery excluded, association-floor 0.2 so
+stopword/length-bias artifacts ("but", "also") never enter — with scale and
+thresholds selected on a held-back 20% of the teacher rows. One gold-holdout
+spend evaluated the result:
+
+| Config | Exact | ±1 | κ |
+|---|---|---|---|
+| stock | 52.5% | 86.3% | 0.190 |
+| vader-v1d (hand) | 51.7% | 86.5% | 0.192 |
+| **vader-v2 (distilled)** | **53.7%** | **89.7%** | **0.195** |
+
+vader-v2 (49 hand + 21 learned terms, thresholds ±0.3) is the best measured
+config on every metric and ships (`model/config/vader-v2/`,
+`ENRICH_LEXICON=vader-v2`). Honest caveats: the gain over stock is within
+sampling noise at n=408, the κ≈0.19 ceiling stands (now consistent across
+five adapted evaluations — VADER's architecture, not the lexicon, is the
+limit), and the wide neutral band trades weak-negative recall (8/52) for
+much better neutral detection (57/151). Scoring ops note: concurrency 12
+drowns long Workers AI runs in 429s; bulk scoring runs at 4.
+
+## Operational notes
+
 - Scoring runs from a laptop via Cloudflare's OpenAI-compatible endpoint
   (`/ai/v1/chat/completions`); resumable — progress flushes to R2 every 25 items.
 - Concurrency 12 triggered 429s when combined with other traffic; back off or

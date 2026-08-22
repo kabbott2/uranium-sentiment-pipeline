@@ -197,7 +197,10 @@ def run_vader_distill(cfg: Config) -> None:
 # centered on the corpus prior so regime-frequency alone earns no valence.
 MIN_TOKEN_DOCS = 50
 SHRINKAGE = 30
-MIN_ABS_VALENCE = 0.4
+# Filter on the raw association, pre-scale — a scaled-valence floor is
+# circular (the scale search just re-inflates stopword/length-bias artifacts
+# like "but"/"also" past any bar). 0.2 keeps opinion vocabulary only.
+MIN_ABS_ASSOCIATION = 0.2
 MAX_LEARNED_TERMS = 400
 
 _TOKEN = re.compile(r"[a-z][a-z'’\-]{1,24}")
@@ -237,9 +240,10 @@ def _token_associations(fit: list, banned: set[str]) -> dict[str, tuple[float, i
 def _build_lexicon(associations: dict, hand_lexicon: dict, scale: float) -> dict:
     learned = {}
     for token, (association, support) in associations.items():
+        if abs(association) < MIN_ABS_ASSOCIATION:
+            continue
         valence = max(-3.5, min(3.5, scale * association))
-        if abs(valence) >= MIN_ABS_VALENCE:
-            learned[token] = (round(valence, 2), abs(valence) * math.log(support))
+        learned[token] = (round(valence, 2), abs(association) * math.log(support))
     top = sorted(learned.items(), key=lambda kv: kv[1][1], reverse=True)[:MAX_LEARNED_TERMS]
     # Hand entries stay; a learned value wins where both exist (data over intuition).
     return {**hand_lexicon, **{token: valence for token, (valence, _) in top}}

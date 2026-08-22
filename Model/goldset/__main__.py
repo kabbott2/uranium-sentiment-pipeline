@@ -8,7 +8,7 @@ from .publish import run_publish_lexicon, run_publish_tags
 from .review import run_export, run_merge
 from .sample import run_sample
 from .score import run_score
-from .vader import run_vader_fit, run_vader_score
+from .vader import run_vader_distill, run_vader_fit, run_vader_score
 
 
 def main() -> None:
@@ -47,6 +47,7 @@ def main() -> None:
     vader_score.add_argument("--stock", action="store_true",
                              help="stock VADER baseline, ignore the overlay")
     vader_sub.add_parser("fit", help="threshold grid + miss table on exemplars only")
+    vader_sub.add_parser("distill", help="fit the lexicon from the bulk teacher labels")
     vader_sub.add_parser("publish", help="upload the lexicon to model/config/")
 
     tags = sub.add_parser("tags", help="tag taxonomy artifacts")
@@ -74,6 +75,8 @@ def main() -> None:
         run_vader_score(cfg, stock=args.stock)
     elif args.command == "vader" and args.vader_command == "fit":
         run_vader_fit(cfg)
+    elif args.command == "vader" and args.vader_command == "distill":
+        run_vader_distill(cfg)
     elif args.command == "vader":
         run_publish_lexicon(cfg)
     elif args.command == "tags":

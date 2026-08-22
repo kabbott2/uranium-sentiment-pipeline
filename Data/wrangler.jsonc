@@ -39,7 +39,7 @@
     "DERIVED_BUCKET": "uranium-derived-sentiment",
     // Model-phase config artifact versions the enrich pass applies; bumping
     // one forces a full re-enrich on the next run.
-    "ENRICH_LEXICON": "vader-v1d",
+    "ENRICH_LEXICON": "vader-v2",
     "ENRICH_TAGS": "tags-v1",
     "DASHBOARD_SUBREDDITS": "uraniumsqueeze"
   }
